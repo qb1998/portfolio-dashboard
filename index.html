@@ -1,0 +1,2625 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>持仓收益看板</title>
+<style>
+  :root{
+    --bg:#070b14;
+    --panel:#0d1320;
+    --panel-2:#121a2b;
+    --line:#1e2a40;
+    --line-2:#2a3a57;
+    --txt:#e8eefb;
+    --txt-dim:#8497b8;
+    --brand:#2f7bff;
+    --brand-2:#5aa0ff;
+    --brand-deep:#1b4fc4;
+    --gold:#d8b75a;
+    --up:#ff5d5d;       /* 红涨（A股习惯）*/
+    --down:#23c08a;     /* 绿跌 */
+    --chip:#152038;
+    --shadow:0 10px 36px rgba(0,0,0,.5);
+    --radius:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;
+    background:
+      radial-gradient(1100px 620px at 82% -12%,rgba(47,123,255,.18),transparent),
+      radial-gradient(820px 520px at -8% 8%,rgba(27,79,196,.20),transparent),
+      var(--bg);
+    color:var(--txt);
+    min-height:100vh;
+    padding:26px 16px 80px;
+    overflow-x:hidden;
+  }
+  .wrap{max-width:1240px;margin:0 auto}
+  .top{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px}
+  .title{font-size:22px;font-weight:800;letter-spacing:.5px;display:flex;align-items:center;gap:11px}
+  .title .dot{width:11px;height:11px;border-radius:50%;background:linear-gradient(135deg,var(--brand-2),var(--brand-deep));box-shadow:0 0 14px rgba(47,123,255,.7)}
+  .title .em{background:linear-gradient(135deg,var(--brand-2),#9fc4ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .top .meta{font-size:12px;color:var(--txt-dim);margin-top:4px}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .btn{
+    border:1px solid var(--line-2);background:var(--panel-2);color:var(--txt);
+    padding:9px 14px;border-radius:11px;font-size:13px;cursor:pointer;transition:.15s;
+    display:inline-flex;align-items:center;gap:6px;
+  }
+  .btn:hover{border-color:var(--brand);transform:translateY(-1px)}
+  .btn.primary{background:linear-gradient(135deg,var(--brand),var(--brand-deep));border:none;font-weight:700;color:#eef5ff}
+  .btn.gold{background:linear-gradient(135deg,#5aa0ff,#1b4fc4);border:none;font-weight:700;color:#eef5ff}
+  .btn.ghost{background:transparent}
+  .btn.danger:hover{border-color:var(--up);color:var(--up)}
+  .btn:disabled{opacity:.6;cursor:not-allowed;transform:none}
+  .switch{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--txt-dim);user-select:none;cursor:pointer;padding:6px 4px}
+  .switch input{display:none}
+  .switch .track{width:38px;height:21px;border-radius:20px;background:var(--line-2);position:relative;transition:.2s}
+  .switch .track::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#8497b8;transition:.2s}
+  .switch input:checked + .track{background:linear-gradient(135deg,var(--brand),var(--brand-deep))}
+  .switch input:checked + .track::after{left:19px;background:#eef5ff}
+
+  /* summary cards */
+  .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:16px}
+  .card{position:relative;background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);overflow:hidden}
+  .card::before{content:"";position:absolute;top:0;left:0;width:100%;height:2px;background:linear-gradient(90deg,var(--brand),transparent)}
+  .card.gold::before{background:linear-gradient(90deg,#5aa0ff,transparent)}
+  .card .lbl{font-size:12px;color:var(--txt-dim);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+  .card .val{font-size:25px;font-weight:800;letter-spacing:.4px;transition:color .2s}
+  .card.gold .val{color:var(--brand-2)}
+  .card .val.flash{animation:flash .7s ease}
+  @keyframes flash{0%{background:rgba(47,123,255,.25)}100%{background:transparent}}
+  .live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--down);margin-left:7px;vertical-align:middle;box-shadow:0 0 8px var(--down)}
+  .live-dot.spin{background:var(--brand-2);box-shadow:0 0 8px var(--brand-2);animation:pulse 1s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .card .sub{font-size:12px;margin-top:6px;color:var(--txt-dim)}
+  .big .val{font-size:28px}
+
+  .filterbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+  .filterbar .seg{display:flex;gap:6px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:5px}
+  .seg .chip{padding:7px 13px;border-radius:8px;font-size:12.5px;color:var(--txt-dim);cursor:pointer;transition:.15s;border:1px solid transparent}
+  .seg .chip:hover{color:var(--txt)}
+  .seg .chip.active{background:linear-gradient(135deg,var(--brand),var(--brand-deep));color:#eef5ff;font-weight:600}
+  .filterbar .label{font-size:12px;color:var(--txt-dim)}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);margin-bottom:18px}
+  .panel h3{font-size:14px;font-weight:700;margin-bottom:14px;color:var(--txt);display:flex;align-items:center;justify-content:space-between}
+  .panel h3 .hint{font-size:11px;color:var(--txt-dim);font-weight:400}
+
+  /* table */
+  .tablewrap{overflow-x:auto;border-radius:10px}
+  .tablewrap::-webkit-scrollbar{height:8px}
+  .tablewrap::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:8px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:0;table-layout:auto}
+  th,td{padding:9px 7px;text-align:right;white-space:nowrap}
+  th{color:var(--txt-dim);font-weight:500;font-size:12px;border-bottom:1px solid var(--line-2)}
+  td{border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left}
+  th.drag-col,td.drag-col{text-align:center;width:28px;padding-left:4px;padding-right:4px}
+  tr:hover td{background:rgba(47,123,255,.06)}
+  tr.dragging{opacity:.45}
+  tr.drop-hint td{box-shadow:inset 0 2px 0 var(--brand)}
+  .drag-handle{cursor:grab;color:var(--txt-dim);font-size:14px;line-height:1;user-select:none}
+  .drag-handle:hover{color:var(--brand-2)}
+  .nm-cell{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
+  .nm-cell .code{font-size:11px;color:var(--txt-dim)}
+  .tag{font-size:10px;padding:2px 7px;border-radius:6px;background:var(--chip);color:var(--brand-2);border:1px solid var(--line-2)}
+  .tag.acct{color:#9fc4ff;border-color:#243a60;background:#101a30}
+  .live{font-size:9px;padding:1px 5px;border-radius:5px;background:rgba(47,123,255,.18);color:var(--brand-2);margin-left:5px;vertical-align:middle}
+  .live.qdii{background:rgba(216,183,90,.16);color:var(--gold)}
+  .manual{font-size:9px;padding:1px 5px;border-radius:5px;background:rgba(132,151,184,.16);color:var(--txt-dim);margin-left:5px;vertical-align:middle}
+  .up{color:var(--up)}
+  .down{color:var(--down)}
+  .updtime{font-size:10px;color:var(--txt-dim)}
+  .updtime.live-t{color:var(--brand-2)}
+  .updtime.manual-t{color:var(--gold)}
+  .rowccy{background:var(--panel-2);border:1px solid var(--line-2);color:var(--txt);border-radius:7px;font-size:11px;padding:3px 5px;outline:none;cursor:pointer}
+  .rowccy:focus{border-color:var(--brand)}
+  .mval{display:flex;flex-direction:column;gap:2px;align-items:flex-end}
+  .row-actions{display:flex;gap:4px;justify-content:flex-end;flex-wrap:nowrap}
+  .icon-btn{border:1px solid var(--line-2);background:var(--panel-2);color:var(--txt-dim);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center}
+  .icon-btn:hover{color:var(--txt);border-color:var(--brand)}
+  .icon-btn.btn-buy{color:var(--up);border-color:rgba(255,93,93,.3)}
+  .icon-btn.btn-buy:hover{border-color:var(--up);background:rgba(255,93,93,.1)}
+  .icon-btn.btn-sell{color:var(--down);border-color:rgba(35,192,138,.3)}
+  .icon-btn.btn-sell:hover{border-color:var(--down);background:rgba(35,192,138,.1)}
+  .empty{text-align:center;color:var(--txt-dim);padding:40px 0;font-size:13px}
+  tfoot td{border-top:2px solid var(--line-2);border-bottom:none;font-weight:700;color:var(--txt);padding-top:13px}
+
+  /* modal */
+  .mask{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(5px);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+  .mask.show{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--line-2);border-radius:18px;width:100%;max-width:520px;box-shadow:var(--shadow);overflow:hidden}
+  .modal .head{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
+  .modal .head h4{font-size:16px}
+  .modal .body{padding:18px 20px;max-height:72vh;overflow:auto}
+  .modal .foot{padding:14px 20px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .field{margin-bottom:14px;position:relative}
+  .field label{display:block;font-size:12px;color:var(--txt-dim);margin-bottom:6px}
+  .field input,.field select{
+    width:100%;background:var(--panel-2);border:1px solid var(--line-2);color:var(--txt);
+    padding:10px 12px;border-radius:10px;font-size:14px;outline:none;
+  }
+  .field input:focus,.field select:focus{border-color:var(--brand)}
+  .field .tip{font-size:11px;color:var(--txt-dim);margin-top:4px}
+  .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .field-row.three{grid-template-columns:1fr 1fr 1fr}
+  .close-x{cursor:pointer;color:var(--txt-dim);font-size:20px;line-height:1}
+  .close-x:hover{color:var(--txt)}
+  /* search dropdown */
+  .sugbox{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:var(--panel-2);border:1px solid var(--line-2);border-radius:10px;box-shadow:var(--shadow);z-index:30;max-height:240px;overflow:auto;display:none}
+  .sugbox.show{display:block}
+  .sug-item{padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;align-items:center}
+  .sug-item:last-child{border-bottom:none}
+  .sug-item:hover{background:rgba(47,123,255,.12)}
+  .sug-item .s-nm{font-size:13px;color:var(--txt)}
+  .sug-item .s-code{font-size:11px;color:var(--txt-dim)}
+  .sug-item .s-type{font-size:10px;color:var(--brand-2);background:var(--chip);padding:1px 6px;border-radius:5px;flex:none}
+  .sug-loading{padding:10px 12px;font-size:12px;color:var(--txt-dim)}
+  .foot-note{text-align:center;color:var(--txt-dim);font-size:11px;margin-top:24px;line-height:1.8}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--panel-2);border:1px solid var(--brand);color:var(--txt);padding:10px 18px;border-radius:12px;font-size:13px;box-shadow:var(--shadow);opacity:0;transition:.25s;z-index:99;pointer-events:none}
+  .toast.show{opacity:1;bottom:34px}
+
+  /* 交易弹窗预览区 */
+  .trade-preview{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12.5px;line-height:1.8}
+  .trade-preview .row{display:flex;justify-content:space-between;align-items:center}
+  .trade-preview .row .lbl{color:var(--txt-dim)}
+  .trade-preview .row .val{font-weight:600;font-variant-numeric:tabular-nums}
+  .trade-preview .divider{border-top:1px solid var(--line);margin:8px 0}
+  .tag-buy{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:var(--up);background:rgba(255,93,93,.12)}
+  .tag-sell{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:var(--down);background:rgba(35,192,138,.12)}
+  .tag-init{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:var(--brand-2);background:rgba(0,150,255,.1)}
+
+  /* 看板 Tab */
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:5px;margin-bottom:14px;width:fit-content}
+  .tabs .tab{padding:8px 18px;border-radius:8px;font-size:13px;color:var(--txt-dim);cursor:pointer;transition:.15s;border:1px solid transparent;font-weight:500}
+  .tabs .tab:hover{color:var(--txt)}
+  .tabs .tab.active{background:linear-gradient(135deg,var(--brand),var(--brand-deep));color:#eef5ff;font-weight:700}
+  .view{display:none}
+  .view.active{display:block}
+  /* 资产总览看板 */
+  .ov-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:14px}
+  .donut-wrap{position:relative;width:170px;height:170px;flex:none}
+  .donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+  .donut-center .dc-lbl{font-size:10px;color:var(--txt-dim)}
+  .donut-center .dc-val{font-size:13px;font-weight:700;color:var(--brand-2)}
+  .ov-row{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  .ov-legend{flex:1;min-width:200px;display:flex;flex-direction:column;gap:9px;max-height:200px;overflow:auto}
+  .ov-legend .li{display:flex;align-items:center;gap:8px;font-size:12px;padding:5px 6px;border-radius:6px}
+  .ov-legend .li:hover{background:rgba(47,123,255,.08)}
+  .ov-legend .sw{width:10px;height:10px;border-radius:3px;flex:none}
+  .ov-legend .nm{flex:1;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ov-legend .pc{color:var(--txt-dim);font-variant-numeric:tabular-nums}
+  .ov-legend .v{color:var(--brand-2);font-variant-numeric:tabular-nums;font-size:11px}
+  .topbar{display:flex;flex-direction:column;gap:6px}
+  .topbar .bar{display:flex;align-items:center;gap:8px;font-size:12px}
+  .topbar .bar .nm{flex:none;width:auto;max-width:46%;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .topbar .bar .track{flex:1;height:8px;background:var(--line);border-radius:4px;overflow:hidden;position:relative}
+  .topbar .bar .fill{position:absolute;top:0;left:0;height:100%;border-radius:4px;background:linear-gradient(90deg,var(--brand-2),var(--brand))}
+  .topbar .bar.up .fill{background:linear-gradient(90deg,#ff8a8a,var(--up))}
+  .topbar .bar.down .fill{background:linear-gradient(90deg,#5fdcb1,var(--down))}
+  .topbar .bar .v{flex:none;font-size:11px;font-variant-numeric:tabular-nums;text-align:right;min-width:88px}
+  .ov-sub{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  /* 收益趋势看板 */
+  .tr-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .tr-toolbar .seg{display:flex;gap:6px;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:4px}
+  .tr-toolbar .chip{padding:6px 12px;border-radius:7px;font-size:12px;color:var(--txt-dim);cursor:pointer}
+  .tr-toolbar .chip.active{background:var(--brand);color:#fff;font-weight:600}
+  .tr-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+  .tr-stat{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .tr-stat .lbl{font-size:11px;color:var(--txt-dim);margin-bottom:5px}
+  .tr-stat .val{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
+  .tr-empty{text-align:center;color:var(--txt-dim);padding:48px 0;font-size:13px;line-height:1.8}
+  .tr-empty b{color:var(--txt)}
+
+  @media (max-width:880px){ .cards{grid-template-columns:repeat(2,1fr)} .ov-grid{grid-template-columns:1fr} .ov-sub{grid-template-columns:1fr} .tr-stats{grid-template-columns:repeat(2,1fr)} .row-actions{gap:2px} .icon-btn{width:24px;height:24px;font-size:11px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div>
+      <div class="title"><span class="dot"></span><span class="em">资产持仓收益看板</span></div>
+      <div class="meta" id="updateMeta">数据保存在本机浏览器 · 行情自动刷新</div>
+    </div>
+    <div class="toolbar">
+      <button class="btn gold" id="refreshBtn" onclick="refreshQuotes(true)">⟳ 刷新行情</button>
+      <label class="switch" title="开启后每 60 秒自动刷新一次行情">
+        <input type="checkbox" id="autoToggle" onchange="toggleAuto()"><span class="track"></span>自动刷新
+      </label>
+      <button class="btn primary" onclick="openAdd()">＋ 添加持仓</button>
+      <button class="btn ghost" onclick="exportExcel()">导出 Excel</button>
+      <button class="btn ghost" onclick="downloadTemplate()">下载模板</button>
+      <button class="btn ghost" onclick="document.getElementById('fileInput').click()">导入</button>
+      <button class="btn ghost danger" onclick="clearAll()">清空</button>
+      <input type="file" id="fileInput" accept=".csv,.xlsx" style="display:none" onchange="handleImport(event)">
+    </div>
+  </div>
+
+  <!-- summary -->
+  <div class="cards">
+    <div class="card gold big">
+      <div class="lbl">总市值（人民币口径）<span class="live-dot" id="liveDot"></span></div>
+      <div class="val" id="sumValue">--</div>
+      <div class="sub" id="sumCost">总投入 -- · 持仓成本 -- · 浮盈 --</div>
+    </div>
+    <div class="card">
+      <div class="lbl">累计收益</div>
+      <div class="val" id="sumPnl">--</div>
+      <div class="sub" id="sumPnlPct">--</div>
+    </div>
+    <div class="card">
+      <div class="lbl">已实现收益</div>
+      <div class="val" id="sumRealized">--</div>
+      <div class="sub" id="sumRealizedPct">--</div>
+    </div>
+    <div class="card">
+      <div class="lbl">当日收益</div>
+      <div class="val" id="sumDay">--</div>
+      <div class="sub" id="sumDayPct">--</div>
+    </div>
+    <div class="card">
+      <div class="lbl">持仓 / 账户</div>
+      <div class="val" id="sumCount">0</div>
+      <div class="sub" id="sumCur">--</div>
+    </div>
+  </div>
+
+  <!-- account filter -->
+  <div class="filterbar">
+    <span class="label">账户筛选：</span>
+    <div class="seg" id="acctSeg"></div>
+  </div>
+
+  <!-- 看板 Tab -->
+  <div class="tabs">
+    <span class="tab active" data-view="viewList" onclick="switchView('viewList')">持仓明细</span>
+    <span class="tab" data-view="viewOverview" onclick="switchView('viewOverview')">资产总览</span>
+    <span class="tab" data-view="viewTrend" onclick="switchView('viewTrend')">收益趋势</span>
+    <span class="tab" data-view="viewTrades" onclick="switchView('viewTrades')">交易记录</span>
+  </div>
+
+  <!-- view: 持仓明细 -->
+  <div class="view active" id="viewList">
+  <div class="panel">
+    <h3>持仓明细 <span class="hint">⠿ 拖动行首排序 · ↑增持 ↓减持 · 每行可单独选展示币种</span></h3>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="drag-col"></th>
+            <th>名称 / 代码</th>
+            <th>账户</th>
+            <th>份额</th>
+            <th>成本价</th>
+            <th>现价</th>
+            <th>当日%</th>
+            <th>当日收益</th>
+            <th>市值</th>
+            <th>累计收益</th>
+            <th>已实现收益</th>
+            <th>展示币种</th>
+            <th>持仓天数</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+        <tfoot id="tfoot"></tfoot>
+      </table>
+    </div>
+    <div class="empty" id="emptyTip" style="display:none">还没有持仓，点右上角「添加持仓」开始记录吧</div>
+  </div>
+  </div>
+
+  <!-- view: 资产总览 -->
+  <div class="view" id="viewOverview">
+    <div class="ov-grid">
+      <div class="panel">
+        <h3>资产分布 <span class="hint">按市值占比 · 折人民币</span></h3>
+        <div class="ov-row">
+          <div class="donut-wrap">
+            <svg id="ovDonut" width="170" height="170" viewBox="0 0 42 42"></svg>
+            <div class="donut-center"><div class="dc-lbl">总市值</div><div class="dc-val" id="ovDonutCenter">--</div></div>
+          </div>
+          <div class="ov-legend" id="ovLegend"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>分组维度 <span class="hint">切换看不同口径</span></h3>
+        <div class="tr-toolbar" style="margin-bottom:10px">
+          <div class="seg" id="ovDimSeg">
+            <span class="chip active" onclick="setOvDim('type')">按类型</span>
+            <span class="chip" onclick="setOvDim('acct')">按账户</span>
+            <span class="chip" onclick="setOvDim('cur')">按币种</span>
+          </div>
+        </div>
+        <div class="topbar" id="ovGroup"></div>
+      </div>
+    </div>
+    <div class="ov-sub">
+      <div class="panel">
+        <h3>累计收益 Top 5</h3>
+        <div class="topbar" id="ovTopGain"></div>
+      </div>
+      <div class="panel">
+        <h3>当日跌幅 Top 5</h3>
+        <div class="topbar" id="ovTopLoss"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- view: 收益趋势 -->
+  <div class="view" id="viewTrend">
+    <div class="panel">
+      <h3>总市值走势 <span class="hint">实线=市值（快照+插值），虚线=累计成本</span></h3>
+      <div class="tr-toolbar">
+        <div class="seg" id="trRangeSeg">
+          <span class="chip" onclick="setTrRange(7)">近7天</span>
+          <span class="chip active" onclick="setTrRange(30)">近30天</span>
+          <span class="chip" onclick="setTrRange(90)">近90天</span>
+          <span class="chip" onclick="setTrRange(365)">近1年</span>
+          <span class="chip" onclick="setTrRange(0)">全部</span>
+        </div>
+        <button class="btn ghost" onclick="snapshotNow()" style="margin-left:auto">立即记录快照</button>
+        <button class="btn ghost danger" onclick="clearSnapshots()">清空历史</button>
+      </div>
+      <div class="tr-stats" id="trStats"></div>
+      <svg id="trChart" width="100%" height="280" viewBox="0 0 800 280" preserveAspectRatio="none" style="background:var(--panel-2);border-radius:10px;border:1px solid var(--line)"></svg>
+      <div class="tr-empty" id="trEmpty" style="display:none">
+        还没有可用的趋势数据<br>
+        <b>请确认持仓里至少有一条填了「购买日期」和「成本价」</b><br>
+        曲线由快照数据+各产品成本/持仓天数推算，不需要每天手动操作
+      </div>
+    </div>
+  </div>
+
+  <!-- view: 交易记录 -->
+  <div class="view" id="viewTrades">
+    <div class="panel">
+      <h3>交易记录 <span class="hint">所有持仓的买入/卖出历史</span></h3>
+      <div class="tr-toolbar" style="margin-bottom:12px">
+        <div class="seg" id="trFilterSeg">
+          <span class="chip active" onclick="setTrFilter('all')">全部</span>
+          <span class="chip" onclick="setTrFilter('buy')">买入</span>
+          <span class="chip" onclick="setTrFilter('sell')">卖出</span>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <select id="trHoldFilter" onchange="renderTrades()" style="background:var(--panel-2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:13px">
+            <option value="all">所有持仓</option>
+          </select>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tbl" style="min-width:860px">
+          <thead>
+            <tr>
+              <th style="width:100px">日期</th>
+              <th>产品</th>
+              <th>类型</th>
+              <th style="text-align:right">份额</th>
+              <th style="text-align:right">价格</th>
+              <th style="text-align:right">手续费</th>
+              <th style="text-align:right">金额</th>
+              <th style="text-align:right">成本均价</th>
+              <th style="text-align:right">持仓份额</th>
+              <th style="text-align:right">已实现收益</th>
+              <th style="width:50px"></th>
+            </tr>
+          </thead>
+          <tbody id="tradeTbody"></tbody>
+          <tfoot id="tradeTfoot"></tfoot>
+        </table>
+      </div>
+      <div id="tradeEmpty" style="display:none;text-align:center;padding:40px;color:var(--txt-dim)">
+        暂无交易记录<br>通过「增持」「减持」操作后会自动记录
+      </div>
+    </div>
+  </div>
+
+  <div class="foot-note">
+    使用说明：① 在「产品名称」框输入名字或代码可<b>联想搜索并自动回填</b>；② 标签含义——<b style="color:var(--brand-2)">自动</b>=可实时取价、<b style="color:var(--gold)">QDII·收盘</b>=QDII盘中无估值仅收盘更新、<b style="color:var(--txt-dim)">手动</b>=无公开行情需自填；③ 每行「展示币种」可单独切换该产品的市值/收益显示口径，合计始终按人民币；④「更新时间」显示该产品行情最近一次刷新的时间（手动维护的标"手动"）；⑤ 数据仅存本机浏览器，换设备请先「导出」备份；⑥ 增持/减持时会<b>自动计算手续费</b>（按持仓类型匹配费率），手续费纳入成本均价和从收益中扣除，可在「⚙ 费率设置」自定义费率。<br>
+    ⚠️ 行情为第三方接口的盘中估算/延迟数据，仅供参考，不构成投资建议。
+  </div>
+</div>
+
+<!-- 添加/编辑持仓 modal -->
+<div class="mask" id="mask">
+  <div class="modal">
+    <div class="head">
+      <h4 id="modalTitle">添加持仓</h4>
+      <span class="close-x" onclick="closeModal()">×</span>
+    </div>
+    <div class="body">
+      <div class="field">
+        <label>产品名称 / 代码搜索 *</label>
+        <input id="f_name" placeholder="输入名称或代码，如 富国全球 / 100055 / 腾讯" autocomplete="off" oninput="onSearchInput()" onfocus="onSearchInput()">
+        <div class="sugbox" id="sugbox"></div>
+        <div class="tip">支持基金/股票联想，选中后自动填代码与类型；也可手动改。</div>
+      </div>
+      <div class="field-row three">
+        <div class="field">
+          <label>类型</label>
+          <select id="f_type" onchange="onTypeChange()">
+            <option>基金</option>
+            <option>股票</option>
+            <option>ETF</option>
+            <option>债券/理财</option>
+            <option>现金</option>
+            <option>其他</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>账户</label>
+          <select id="f_acct" onchange="onAcctSelect()"></select>
+        </div>
+        <div class="field">
+          <label>购买日期</label>
+          <input id="f_date" type="date">
+        </div>
+      </div>
+      <div class="field" id="acctCustomWrap" style="display:none">
+        <label>自定义账户名称</label>
+        <input id="f_acct_custom" placeholder="输入你的账户名，如 雪盈证券 / 老虎证券">
+      </div>
+      <div class="field">
+        <label id="f_code_label">行情代码（基金填6位代码 / 股票填 sh600519、hk00700、usAAPL）</label>
+        <input id="f_code" placeholder="如 100055 / sh600519 / hk00700 / usAAPL">
+        <div class="tip">填对代码后可自动更新现价与当日涨跌幅；不填或取不到则手动维护。</div>
+      </div>
+      <div class="field-row three">
+        <div class="field">
+          <label>持有份额 / 数量 *</label>
+          <input id="f_shares" type="number" step="any" placeholder="如 1000">
+        </div>
+        <div class="field">
+          <label>成本价 *</label>
+          <input id="f_cost" type="number" step="any" placeholder="买入均价">
+        </div>
+        <div class="field">
+          <label>当前价 *</label>
+          <input id="f_price" type="number" step="any" placeholder="最新净值/价格">
+        </div>
+      </div>
+      <div class="field-row three">
+        <div class="field">
+          <label>当日涨跌幅 %</label>
+          <input id="f_day" type="number" step="any" placeholder="如 1.5 或 -2.3">
+        </div>
+        <div class="field">
+          <label>计价币种</label>
+          <select id="f_cur" onchange="onCurChange()">
+            <option value="CNY">CNY 人民币</option>
+            <option value="USD">USD 美元</option>
+            <option value="HKD">HKD 港元</option>
+            <option value="EUR">EUR 欧元</option>
+            <option value="JPY">JPY 日元</option>
+            <option value="OTH">其他</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>对人民币汇率</label>
+          <input id="f_fx" type="number" step="any" value="1" placeholder="人民币填1">
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <button class="btn ghost" id="quoteBtn" onclick="quoteInModal()" style="visibility:hidden">⟳ 取一次价</button>
+      <div style="display:flex;gap:10px">
+        <button class="btn ghost" onclick="closeModal()">取消</button>
+        <button class="btn primary" onclick="saveHolding()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 增持/减持 modal -->
+<div class="mask" id="tradeMask">
+  <div class="modal">
+    <div class="head">
+      <h4 id="tradeTitle">增持</h4>
+      <span class="close-x" onclick="closeTradeModal()">×</span>
+    </div>
+    <div class="body">
+      <div id="tradeHoldingInfo" style="margin-bottom:14px;font-size:13px;color:var(--txt-dim)"></div>
+      <div class="field-row three">
+        <div class="field">
+          <label id="tradeSharesLabel">增持份额 *</label>
+          <input id="t_shares" type="number" step="any" placeholder="数量" oninput="updateTradePreview()">
+        </div>
+        <div class="field">
+          <label id="tradePriceLabel">买入价格 *</label>
+          <input id="t_price" type="number" step="any" placeholder="成交价格" oninput="updateTradePreview()">
+        </div>
+        <div class="field">
+          <label>交易日期</label>
+          <input id="t_date" type="date">
+        </div>
+      </div>
+      <div class="field-row" style="margin-top:2px">
+        <div class="field">
+          <label>手续费 <span style="font-weight:normal;color:var(--txt-dim);font-size:11px">(自动计算，可修改)</span></label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="t_fee" type="number" step="any" placeholder="0" oninput="this._auto=false;updateTradePreview()" style="flex:1">
+            <button class="btn ghost" style="padding:7px 10px;font-size:11px;white-space:nowrap" onclick="recalcFee()" title="按当前类型和费率重新计算">重算</button>
+          </div>
+          <div class="tip" id="t_fee_tip"></div>
+        </div>
+        <div class="field" style="display:flex;align-items:flex-end">
+          <button class="btn ghost" style="width:100%;font-size:12px" onclick="openFeeCfg()">⚙ 费率设置</button>
+        </div>
+      </div>
+      <div class="trade-preview" id="tradePreview" style="display:none"></div>
+    </div>
+    <div class="foot">
+      <div></div>
+      <div style="display:flex;gap:10px">
+        <button class="btn ghost" onclick="closeTradeModal()">取消</button>
+        <button class="btn primary" id="tradeSaveBtn" onclick="saveTrade()">确认</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 下载辅助 modal -->
+<div class="mask" id="dlMask">
+  <div class="modal" style="max-width:620px">
+    <div class="head">
+      <h4>保存文件</h4>
+      <span class="close-x" onclick="closeDlModal()">×</span>
+    </div>
+    <div class="body">
+      <p style="margin:0 0 6px;color:var(--txt-dim);font-size:13px">请点击下方按钮下载文件，如浏览器拦截了自动下载，请手动点击链接保存：</p>
+      <p style="margin:0 0 14px;font-size:14px"><b id="dlFilename"></b></p>
+      <a id="dlLink" class="btn primary" style="display:inline-block;text-decoration:none;margin-bottom:14px;padding:10px 28px;font-size:15px" download>下载文件</a>
+      <div id="dlTextWrap" style="display:none">
+        <p style="margin:0 0 6px;color:var(--txt-dim);font-size:13px">如链接无法下载，可复制下方内容，粘贴到文本编辑器后另存为 .csv 文件：</p>
+        <textarea id="dlContent" rows="8" style="width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:8px;font-size:12px;resize:vertical"></textarea>
+        <button class="btn ghost" style="margin-top:8px" onclick="copyDlContent()">复制到剪贴板</button>
+      </div>
+    </div>
+    <div class="foot">
+      <div></div>
+      <button class="btn ghost" onclick="closeDlModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- 费率设置 modal -->
+<div class="mask" id="feeCfgMask">
+  <div class="modal" style="max-width:580px">
+    <div class="head">
+      <h4>⚙ 交易费率设置</h4>
+      <span class="close-x" onclick="closeFeeCfg()">×</span>
+    </div>
+    <div class="body" id="feeCfgBody" style="font-size:13px;line-height:1.9"></div>
+    <div class="foot">
+      <button class="btn ghost" onclick="resetFeeCfg()">恢复默认</button>
+      <div style="display:flex;gap:10px">
+        <button class="btn ghost" onclick="closeFeeCfg()">取消</button>
+        <button class="btn primary" onclick="saveFeeCfgUI()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const KEY='holding_dashboard_v2';
+const ACCT_KEY='holding_dashboard_accts';
+const SNAP_KEY='holding_dashboard_snapshots';
+const DATA_VER='holding_dashboard_ver';
+const CUR_VER=3; // 每次更新默认数据时递增
+let data=load();
+let editId=null;
+let acctFilter='全部';
+let autoTimer=null;
+let customAccts=loadAccts();
+let tradeTarget=null; // {id, type:'buy'|'sell'}
+
+const COLORS=['#2f7bff','#5aa0ff','#9fc4ff','#36cfc9','#7c5cff','#d8b75a','#ff9f45','#ff5c5c','#9254de','#ff85c0'];
+const FX_DEFAULT={CNY:1,USD:7.18,HKD:0.92,EUR:7.8,JPY:0.046,OTH:1};
+let FX=Object.assign({},FX_DEFAULT);
+let fxMeta='默认汇率';
+
+/* ============ 交易费率配置 ============ */
+const FEE_CFG_KEY='holding_dashboard_fee_cfg';
+const FEE_CFG_DEFAULT={
+  'A股':{commissionRate:0.00025,commissionMin:5,stampRate:0.0005,stampSellOnly:true,transferRate:0.00001},
+  '港股':{commissionRate:0.0003,commissionMin:3,stampRate:0.0013,stampSellOnly:false,levyRate:0.0000278,ccassRate:0.00005,exchangeRate:0.0000565,settlementRate:0.00002},
+  '基金':{subscribeRate:0.0015,redeemRates:[{days:7,rate:0.015},{days:30,rate:0.0075},{days:365,rate:0.005},{days:Infinity,rate:0}]},
+  '债券/理财':{flatRate:0}
+};
+let FEE_CFG=loadFeeCfg();
+function loadFeeCfg(){try{const s=localStorage.getItem(FEE_CFG_KEY);if(s)return JSON.parse(s);}catch(e){}return JSON.parse(JSON.stringify(FEE_CFG_DEFAULT));}
+function saveFeeCfg(){localStorage.setItem(FEE_CFG_KEY,JSON.stringify(FEE_CFG));}
+
+function getFeeType(h){
+  const t=h.type||'';
+  if(t==='股票'){const c=h.code||'';return(c.startsWith('hk')||c.startsWith('HK'))?'港股':'A股';}
+  if(t==='基金') return '基金';
+  if(t.includes('债券')||t.includes('理财')) return '债券/理财';
+  return 'A股';
+}
+function calcHoldDays(h){
+  // 从所有买入交易中找最早的日期
+  ensureTrades(h);
+  let earliest='';
+  h.trades.forEach(tr=>{if(tr.type==='buy'&&tr.date&&(!earliest||tr.date<earliest))earliest=tr.date;});
+  if(!earliest)return 0;
+  const d=new Date(earliest+'T00:00:00');
+  if(isNaN(d))return 0;
+  const today=new Date();today.setHours(0,0,0,0);
+  return Math.max(0,Math.floor((today-d)/86400000));
+}
+function calcFee(h,shares,price,tradeType){
+  const feeType=getFeeType(h);
+  const cfg=FEE_CFG[feeType];
+  if(!cfg)return {total:0,detail:'未知类型'};
+  const amount=shares*price;
+  const ccy=h.cur||'CNY';
+  const ccySym=ccy==='HKD'?'HK$':ccy==='USD'?'$':'¥';
+
+  if(feeType==='A股'){
+    const commission=Math.max(amount*(cfg.commissionRate||0),cfg.commissionMin||0);
+    const transfer=amount*(cfg.transferRate||0);
+    let stamp=0;
+    let parts=[`佣金 ${ccySym}${fmt(commission,2)}`];
+    if(transfer>0.005)parts.push(`过户费 ${ccySym}${fmt(transfer,2)}`);
+    if(tradeType==='sell'){
+      stamp=amount*(cfg.stampRate||0);
+      if(stamp>0.005)parts.push(`印花税 ${ccySym}${fmt(stamp,2)}`);
+    }
+    return {total:commission+transfer+stamp,detail:parts.join(' + ')};
+  }
+  if(feeType==='港股'){
+    const commission=Math.max(amount*(cfg.commissionRate||0),cfg.commissionMin||0);
+    const stamp=amount*(cfg.stampRate||0);
+    const levy=amount*(cfg.levyRate||0);
+    const ccass=amount*(cfg.ccassRate||0);
+    const exchange=amount*(cfg.exchangeRate||0);
+    const settlement=amount*(cfg.settlementRate||0);
+    const total=commission+stamp+levy+ccass+exchange+settlement;
+    const detail=`佣金 ${fmt(commission,2)} + 印花税 ${fmt(stamp,2)} + 征费 ${fmt(levy,2)} + 交收费 ${fmt(ccass,2)} + 联交所 ${fmt(exchange,2)} + 结算 ${fmt(settlement,2)}`;
+    return {total,detail};
+  }
+  if(feeType==='基金'){
+    if(tradeType==='buy'){
+      const sub=amount*(cfg.subscribeRate||0);
+      return {total:sub,detail:`申购费 ¥${fmt(sub,2)} (费率${(cfg.subscribeRate*100).toFixed(2)}%)`};
+    }else{
+      const holdDays=calcHoldDays(h);
+      let rate=0;
+      for(const r of (cfg.redeemRates||[])){if(holdDays<r.days){rate=r.rate;break;}}
+      const redeem=amount*rate;
+      return {total:redeem,detail:`赎回费 ¥${fmt(redeem,2)} (持有${holdDays}天, 费率${(rate*100).toFixed(2)}%)`};
+    }
+  }
+  return {total:0,detail:'无手续费'};
+}
+
+function fetchFxRates(){
+  // 优先用 fetch（http/https 下可用），失败则用 JSONP 兼容 file://
+  const applyRates=j=>{
+    if(j&&j.rates){
+      ['USD','HKD','EUR','JPY'].forEach(c=>{ if(j.rates[c]) FX[c]=1/j.rates[c]; });
+      FX.CNY=1;
+      const d=j.time_last_update_unix?new Date(j.time_last_update_unix*1000):new Date();
+      fxMeta='实时汇率·'+d.toLocaleDateString('zh-CN')+' (USD '+FX.USD.toFixed(3)+'/HKD '+FX.HKD.toFixed(3)+')';
+      render();
+    }
+  };
+  const onFail=()=>{ fxMeta='实时汇率获取失败，用默认值'; };
+  // 方法1: fetch（需要 CORS，file:// 下可能失败）
+  fetch('https://open.er-api.com/v6/latest/CNY').then(r=>r.json()).then(j=>{
+    if(j&&j.result==='success') applyRates(j); else onFail();
+  }).catch(()=>{
+    // 方法2: JSONP（兼容 file:// 协议）
+    const cbName='_fx_cb_'+Date.now();
+    const timer=setTimeout(()=>{delete window[cbName];onFail();},8000);
+    window[cbName]=function(j){
+      clearTimeout(timer);delete window[cbName];
+      if(j&&j.result==='success') applyRates(j); else onFail();
+    };
+    const s=document.createElement('script');
+    s.src='https://open.er-api.com/v6/latest/CNY?callback='+cbName;
+    s.onerror=()=>{clearTimeout(timer);delete window[cbName];s.remove();onFail();};
+    s.onload=()=>{s.remove();};
+    document.body.appendChild(s);
+  });
+}
+const CCY_SYMBOL={CNY:'¥',USD:'$',HKD:'HK$',EUR:'€',JPY:'¥',OTH:'¤'};
+
+function load(){
+  // 仅更新版本号，不清除用户已保存的数据
+  localStorage.setItem(DATA_VER,String(CUR_VER));
+  try{const r=localStorage.getItem(KEY);if(r)return JSON.parse(r);}catch(e){}
+  return [
+    {id:id(),name:'恒生科技ETF华夏',code:'sh513180',type:'股票',acct:'招商证券',date:'2026-04-02',shares:7500,cost:0.5413,price:0.582,day:0.34,cur:'CNY',fx:1,
+     trades:[{date:'2026-04-02',shares:7500,price:0.5413,type:'buy'}]},
+    {id:id(),name:'大北农',code:'sz002385',type:'股票',acct:'招商证券',date:'2025-08-28',shares:4700,cost:4.1143,price:2.87,day:-0.69,cur:'CNY',fx:1,
+     trades:[{date:'2025-08-28',shares:4700,price:4.1143,type:'buy'}]},
+    {id:id(),name:'易方达先锋成长混合A(6月1日)',code:'011891',type:'基金',acct:'招商证券',date:'2026-06-01',shares:12704.24,cost:3.9298,price:5.1797,day:4.78,cur:'CNY',fx:1,
+     trades:[{date:'2026-06-01',shares:12704.24,price:3.9298,type:'buy'}]},
+    {id:id(),name:'易方达先锋成长混合A(6月8日)',code:'011891',type:'基金',acct:'招商证券',date:'2026-06-08',shares:4168.4,cost:4.2279,price:5.1782,day:4.75,cur:'CNY',fx:1,
+     trades:[{date:'2026-06-08',shares:4168.4,price:4.2279,type:'buy'}]},
+    {id:id(),name:'广发全球精选',code:'HK0000914660',type:'基金',acct:'富途',date:'2026-06-01',shares:277.0309,cost:2.887764,price:2.893137,day:0,cur:'USD',fx:7.18,
+     trades:[{date:'2026-06-01',shares:277.0309,price:2.887764,type:'buy'}]},
+    {id:id(),name:'泡泡玛特',code:'hk09992',type:'股票',acct:'富途',date:'2026-05-13',shares:9,cost:159,price:160.2,day:-2.50,cur:'HKD',fx:0.92,
+     trades:[{date:'2026-05-13',shares:9,price:159,type:'buy'}]},
+    {id:id(),name:'工银理财·天天鑫添益(6月2日)',code:'CZZQ1801',type:'债券/理财',acct:'工商银行',date:'2026-06-02',shares:3968883.95,cost:1.2598,price:1.2586,day:0,cur:'CNY',fx:1,
+     trades:[{date:'2026-06-02',shares:3968883.95,price:1.2598,type:'buy'}]},
+    {id:id(),name:'融通产业趋势',code:'008382',type:'基金',acct:'工商银行',date:'2026-06-02',shares:42171.98,cost:2.3362,price:2.9636,day:4.17,cur:'CNY',fx:1,
+     trades:[{date:'2026-06-02',shares:42171.98,price:2.3362,type:'buy'}]},
+    {id:id(),name:'富国全球科技互联网（QDII）',code:'100055',type:'基金',acct:'工商银行',date:'2026-06-02',shares:68788,cost:5.937,price:6.4035,day:0.08,cur:'CNY',fx:1,
+     trades:[{date:'2026-06-02',shares:68788,price:5.937,type:'buy'}]},
+    {id:id(),name:'工银理财·天天鑫添益(5月13日)',code:'CZZQ1801',type:'债券/理财',acct:'工商银行',date:'2026-05-13',shares:397.46,cost:1.258,price:1.2586,day:0,cur:'CNY',fx:1,
+     trades:[{date:'2026-05-13',shares:397.46,price:1.258,type:'buy'}]}
+  ];
+}
+function save(){localStorage.setItem(KEY,JSON.stringify(data));}
+function loadAccts(){try{const r=localStorage.getItem(ACCT_KEY);if(r)return JSON.parse(r);}catch(e){}return [];}
+function saveAccts(){localStorage.setItem(ACCT_KEY,JSON.stringify(customAccts));}
+function id(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+function num(v){const n=parseFloat(v);return isNaN(n)?0:n;}
+function fmt(n,d=2){return n.toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function cls(n){return n>0?'up':(n<0?'down':'');}
+function sign(n){return n>0?'+':'';}
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
+function curShort(c){return (c||'CNY').split(' ')[0];}
+function isOffshore(h){return /^[A-Za-z]{2}\d{8,}$/.test((h.code||'').trim());}
+function canQuote(h){return h.code&&!isOffshore(h)&&(h.type==='基金'||h.type==='股票'||h.type==='ETF');}
+function isQDII(h){return /QDII/i.test(h.name||'')||/QDII/i.test(h.code||'');}
+function moneyCNY(cny){return '¥'+fmt(cny,2);}
+
+/* 确保 holding 有 trades 数组（向后兼容） */
+function ensureTrades(h){
+  if(!h.trades||!h.trades.length){
+    h.trades=[{date:h.date||todayKey(),shares:num(h.shares),price:num(h.cost),type:'buy'}];
+  }
+  return h;
+}
+
+function rowDisp(h){return h.disp||curShort(h.cur)||'CNY';}
+function rowRate(d){return FX[d]||FX_DEFAULT[d]||1;}
+function rowMoney(h,cnyVal){
+  const d=rowDisp(h);
+  const sym=CCY_SYMBOL[d]||'¤';
+  return sym+fmt(cnyVal/rowRate(d),2);
+}
+
+function holdDays(h){
+  if(!h.date)return null;
+  const d=new Date(h.date+'T00:00:00');
+  if(isNaN(d))return null;
+  const diff=Math.floor((Date.now()-d.getTime())/86400000);
+  return diff<0?0:diff;
+}
+
+function calcRealizedPnl(h){
+  // 从 trades 数组计算累计已实现收益（已扣手续费）
+  ensureTrades(h);
+  const fx=num(h.fx)||1;
+  let runShares=0, runCostBasis=0, totalRealized=0;
+  h.trades.forEach(tr=>{
+    const s=num(tr.shares), p=num(tr.price), f=num(tr.fee);
+    if(tr.type==='buy'){
+      runShares+=s; runCostBasis+=s*p+f; // 手续费纳入成本基础
+    }else{
+      const curAvg=runShares>0?runCostBasis/runShares:0;
+      totalRealized+=(p-curAvg)*s*fx - f*fx; // 手续费从收益中扣除
+      runShares-=s; runCostBasis-=s*curAvg;
+      if(runShares<0)runShares=0; if(runCostBasis<0)runCostBasis=0;
+    }
+  });
+  return totalRealized;
+}
+
+function calcTotalInvested(h){
+  // 从 trades 数组计算总投入金额（所有买入金额+手续费之和，折人民币）
+  ensureTrades(h);
+  const fx=num(h.fx)||1;
+  let total=0;
+  h.trades.forEach(tr=>{
+    if(tr.type==='buy') total+=(num(tr.shares)*num(tr.price)+num(tr.fee))*fx;
+  });
+  return total;
+}
+
+function compute(h){
+  const fx=num(h.fx)||1;
+  const value=num(h.shares)*num(h.price)*fx;
+  const cost=num(h.shares)*num(h.cost)*fx;
+  const unrealizedPnl=value-cost;
+  const realizedPnl=calcRealizedPnl(h);
+  const pnl=unrealizedPnl+realizedPnl; // 累计收益 = 浮盈 + 已实现
+  const totalInvested=calcTotalInvested(h);
+  const pnlPct=totalInvested?pnl/totalInvested*100:(cost?pnl/cost*100:0);
+  const dayPct=num(h.day);
+  // 防止 dayPct=-100 导致除零
+  let prevValue=0;
+  if(dayPct>-99.99){
+    prevValue=value/(1+dayPct/100);
+  }else{
+    prevValue=0;
+  }
+  const dayPnl=value-prevValue;
+  return {value,cost,unrealizedPnl,realizedPnl,pnl,pnlPct,dayPct,dayPnl,totalInvested};
+}
+
+function filtered(){return acctFilter==='全部'?data:data.filter(h=>(h.acct||'其他')===acctFilter);}
+
+function renderAcctSeg(){
+  const seg=document.getElementById('acctSeg');
+  const accts=['全部',...Array.from(new Set(data.map(h=>h.acct||'其他')))];
+  seg.innerHTML=accts.map(a=>`<span class="chip ${a===acctFilter?'active':''}" onclick="setAcct('${esc(a)}')">${esc(a)}</span>`).join('');
+}
+function setAcct(a){acctFilter=a;render();}
+
+function updInline(h){
+  if(canQuote(h)){
+    if(h.upd) return `<span class="updtime live-t">${esc(h.upd)}</span>`;
+    return `<span class="updtime">待刷新</span>`;
+  }
+  return `<span class="updtime manual-t">手动维护</span>`;
+}
+
+const CCY_OPTS=['CNY','USD','HKD','EUR','JPY'];
+function rowCcySelect(h){
+  const cur=rowDisp(h);
+  const opts=Array.from(new Set([cur,...CCY_OPTS]));
+  return `<select class="rowccy" onchange="setRowCcy('${h.id}',this.value)">`+
+    opts.map(c=>`<option value="${c}" ${c===cur?'selected':''}>${CCY_SYMBOL[c]||c} ${c}</option>`).join('')+
+    `</select>`;
+}
+function setRowCcy(hid,c){const h=data.find(x=>x.id===hid);if(h){h.disp=c;render();}}
+
+let lastTV=null;
+function render(){
+  renderAcctSeg();
+  const list=filtered();
+  const tb=document.getElementById('tbody');
+  tb.innerHTML='';
+  let tV=0,tC=0,tDay=0,tRealized=0;
+  list.forEach((h)=>{
+    ensureTrades(h);
+    const c=compute(h);
+    tV+=c.value;tC+=c.cost;tDay+=c.dayPnl;tRealized+=c.realizedPnl;
+    const days=holdDays(h);
+    let tag='';
+    if(canQuote(h)) tag=isQDII(h)?'<span class="live qdii">QDII·收盘</span>':'<span class="live">自动</span>';
+    else if(h.type!=='债券/理财'&&h.type!=='现金') tag='<span class="manual">手动</span>';
+    const curTag=(h.cur&&curShort(h.cur)!=='CNY')?' · '+esc(curShort(h.cur)):'';
+    const tr=document.createElement('tr');
+    tr.setAttribute('draggable',acctFilter==='全部'?'true':'false');
+    tr.dataset.id=h.id;
+    tr.innerHTML=`
+      <td class="drag-col"><span class="drag-handle" title="拖动排序">⠿</span></td>
+      <td><div class="nm-cell"><span>${esc(h.name)}${tag}</span><span class="code">${esc(h.code||'-')}${curTag} · ${updInline(h)}</span></div></td>
+      <td><span class="tag acct">${esc(h.acct||'其他')}</span></td>
+      <td>${fmt(num(h.shares),num(h.shares)%1?2:0)}</td>
+      <td>${fmt(num(h.cost),4)}</td>
+      <td>${fmt(num(h.price),4)}</td>
+      <td class="${cls(c.dayPct)}">${sign(c.dayPct)}${fmt(c.dayPct,2)}%</td>
+      <td class="${cls(c.dayPnl)}">${sign(c.dayPnl)}${rowMoney(h,c.dayPnl)}</td>
+      <td>${rowMoney(h,c.value)}</td>
+      <td class="${cls(c.pnl)}">${sign(c.pnl)}${rowMoney(h,c.pnl)}<br><span style="font-size:11px">${sign(c.pnlPct)}${fmt(c.pnlPct,2)}%</span></td>
+      <td class="${cls(c.realizedPnl)}">${Math.abs(c.realizedPnl)>0.005?sign(c.realizedPnl)+rowMoney(h,c.realizedPnl):'<span style="color:var(--txt-dim)">—</span>'}</td>
+      <td>${rowCcySelect(h)}</td>
+      <td>${days==null?'<span style="color:var(--txt-dim)">—</span>':days+' 天'}</td>
+      <td><div class="row-actions">
+        <button class="icon-btn btn-buy" title="增持" onclick="openTrade('${h.id}','buy')">↑</button>
+        <button class="icon-btn btn-sell" title="减持" onclick="openTrade('${h.id}','sell')">↓</button>
+        <button class="icon-btn" title="编辑" onclick="openEdit('${h.id}')">✎</button>
+        <button class="icon-btn" title="删除" onclick="del('${h.id}')">✕</button>
+      </div></td>`;
+    tb.appendChild(tr);
+  });
+  document.getElementById('emptyTip').style.display=list.length?'none':'block';
+  bindDrag();
+
+  const tf=document.getElementById('tfoot');
+  if(list.length){
+    const prevTotal=tV-tDay;
+    const dayPctTotal=prevTotal?tDay/prevTotal*100:0;
+    const tUnrealized=tV-tC;
+    const tPnlAll=tUnrealized+tRealized;
+    tf.innerHTML=`<tr>
+      <td></td><td>合计（${acctFilter}）</td><td></td><td></td><td></td><td></td>
+      <td class="${cls(tDay)}">${prevTotal?sign(dayPctTotal)+fmt(dayPctTotal,2)+'%':'—'}</td>
+      <td class="${cls(tDay)}">${sign(tDay)}${moneyCNY(tDay)}</td>
+      <td>${moneyCNY(tV)}</td>
+      <td class="${cls(tPnlAll)}">${sign(tPnlAll)}${moneyCNY(tPnlAll)}</td>
+      <td class="${cls(tRealized)}">${Math.abs(tRealized)>0.005?sign(tRealized)+moneyCNY(tRealized):'—'}</td>
+      <td style="font-size:10px;color:var(--txt-dim)">折人民币</td><td></td><td></td></tr>`;
+  }else tf.innerHTML='';
+
+  const tPnl=tV-tC+tRealized;
+  const tUnrealizedOnly=tV-tC;
+  const tTotalInvested=list.reduce((s,h)=>s+calcTotalInvested(h),0);
+  // 累计手续费（所有交易的手续费之和，折人民币）
+  const tTotalFee=list.reduce((s,h)=>{ensureTrades(h);const fx=num(h.fx)||1;return s+h.trades.reduce((ss,tr)=>ss+num(tr.fee)*fx,0);},0);
+  const sv=document.getElementById('sumValue');
+  sv.textContent=moneyCNY(tV);
+  if(lastTV!==null&&Math.abs(tV-lastTV)>0.005){sv.classList.remove('flash');void sv.offsetWidth;sv.classList.add('flash');}
+  lastTV=tV;
+  document.getElementById('sumCost').innerHTML='总投入(含费) '+moneyCNY(tTotalInvested)+' · 持仓成本 '+moneyCNY(tC)+' · 浮盈 '+moneyCNY(tUnrealizedOnly)+(tTotalFee>0.005?' <span style="font-size:10px;color:var(--gold)">累计手续费 '+moneyCNY(tTotalFee)+'</span>':'');
+  setColored('sumPnl',tPnl,moneyCNY(tPnl),true);
+  const tPnlPctVal=tTotalInvested?tPnl/tTotalInvested*100:(tC?tPnl/tC*100:0);
+  document.getElementById('sumPnlPct').innerHTML=colored(tPnlPctVal,'浮盈+已实现 '+sign(tPnlPctVal)+fmt(tPnlPctVal,2)+'%');
+  setColored('sumRealized',tRealized,moneyCNY(tRealized),true);
+  const realizedPct=tTotalInvested?tRealized/tTotalInvested*100:0;
+  document.getElementById('sumRealizedPct').innerHTML=colored(tRealized,'占总投入 '+sign(realizedPct)+fmt(realizedPct,2)+'%');
+  setColored('sumDay',tDay,moneyCNY(tDay),true);
+  document.getElementById('sumDayPct').innerHTML=colored(tDay,'占总市值 '+fmt(tV?tDay/tV*100:0,2)+'%');
+  document.getElementById('sumCount').textContent=list.length;
+  const acctCount=new Set(data.map(h=>h.acct||'其他')).size;
+  document.getElementById('sumCur').textContent=acctCount+' 个账户 · 合计折人民币';
+  renderOverview();
+  renderTrend();
+  save();
+}
+
+function setColored(elId,n,text,withSign){
+  const el=document.getElementById(elId);
+  el.className='val '+cls(n);
+  el.textContent=(withSign&&n>0?'+':'')+text;
+}
+function colored(n,text){return `<span class="${cls(n)}">${text}</span>`;}
+
+/* ===== 拖动排序 ===== */
+let dragId=null;
+function bindDrag(){
+  document.querySelectorAll('#tbody tr').forEach(tr=>{
+    tr.addEventListener('dragstart',e=>{
+      if(acctFilter!=='全部'){e.preventDefault();return;}
+      dragId=tr.dataset.id;tr.classList.add('dragging');e.dataTransfer.effectAllowed='move';
+    });
+    tr.addEventListener('dragend',()=>{tr.classList.remove('dragging');document.querySelectorAll('#tbody tr').forEach(r=>r.classList.remove('drop-hint'));});
+    tr.addEventListener('dragover',e=>{e.preventDefault();document.querySelectorAll('#tbody tr').forEach(r=>r.classList.remove('drop-hint'));tr.classList.add('drop-hint');});
+    tr.addEventListener('drop',e=>{e.preventDefault();
+      const targetId=tr.dataset.id;
+      if(!dragId||dragId===targetId)return;
+      const from=data.findIndex(x=>x.id===dragId);
+      const to=data.findIndex(x=>x.id===targetId);
+      if(from<0||to<0)return;
+      const [moved]=data.splice(from,1);
+      data.splice(to,0,moved);
+      dragId=null;render();
+    });
+  });
+}
+
+/* ============ 行情自动取数 ============ */
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.classList.add('show');
+  clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);
+}
+
+/* ============ 通用下载（兼容所有协议） ============ */
+function triggerDownload(blob,filename,textContent){
+  // 自动尝试下载（http/https 下通常成功）
+  try{
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=filename;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),5000);
+  }catch(e){}
+  // 始终弹出辅助弹窗，确保 file:// 下也能保存
+  showDlModal(blob,filename,textContent);
+}
+function showDlModal(blob,filename,textContent){
+  const isText=blob.type.startsWith('text/')||filename.endsWith('.csv');
+  document.getElementById('dlFilename').textContent=filename;
+  const reader=new FileReader();
+  reader.onload=function(){
+    const link=document.getElementById('dlLink');
+    link.href=reader.result;link.download=filename;
+  };
+  reader.readAsDataURL(blob);
+  if(isText&&textContent){
+    document.getElementById('dlContent').value=textContent;
+    document.getElementById('dlTextWrap').style.display='block';
+  }else{
+    document.getElementById('dlTextWrap').style.display='none';
+  }
+  document.getElementById('dlMask').classList.add('show');
+}
+function closeDlModal(){document.getElementById('dlMask').classList.remove('show');}
+function copyDlContent(){
+  const ta=document.getElementById('dlContent');ta.select();ta.setSelectionRange(0,99999);
+  if(navigator.clipboard){navigator.clipboard.writeText(ta.value).then(()=>toast('已复制到剪贴板'));}
+  else{document.execCommand('copy');toast('已复制到剪贴板');}
+}
+function setBusy(on){
+  document.getElementById('liveDot').classList.toggle('spin',on);
+  document.getElementById('refreshBtn').disabled=on;
+}
+
+let pending=0, manualFlag=false, quoteGuard=null, quoteDone=false;
+
+window.jsonpgz=function(d){
+  if(!d||!d.fundcode)return;
+  // 用 filter 找所有同代码持仓（同一基金可能有多笔买入记录）
+  const matches=data.filter(x=>x.code===d.fundcode);
+  matches.forEach(h=>{
+    if(h){
+      if(d.gsz) h.price=num(d.gsz);
+      if(d.gszzl) h.day=num(d.gszzl);
+      h.upd=(d.gztime||'').replace(/^\d{4}-/,'')+(isQDII(h)?'(收盘)':'');
+      h._q=true;
+    }
+  });
+  dec();
+};
+function fetchFund(h){
+  pending++;
+  const s=document.createElement('script');
+  s.src='https://fundgz.1234567.com.cn/js/'+encodeURIComponent(h.code)+'.js?rt='+Date.now();
+  s.onerror=()=>{dec();s.remove();};
+  s.onload=()=>{s.remove();};
+  document.body.appendChild(s);
+}
+function normCode(raw){
+  let c=String(raw||'').trim();
+  if(!c)return '';
+  const m=c.toLowerCase();
+  if(/^hk/.test(m)){
+    let num=c.replace(/^hk/i,'').replace(/\D/g,'');
+    if(num) return 'hk'+num.padStart(5,'0');
+    return c;
+  }
+  if(/^(sh|sz)/i.test(m)) return m.slice(0,2)+c.slice(2);
+  if(/^us/i.test(m)) return 'us'+c.slice(2).toUpperCase();
+  if(/^\d{6}$/.test(c)){
+    if(/^6/.test(c))return 'sh'+c;
+    if(/^(0|2|3)/.test(c))return 'sz'+c;
+    if(/^(4|8)/.test(c))return 'bj'+c;
+  }
+  if(/^\d{1,5}$/.test(c))return 'hk'+c.padStart(5,'0');
+  return c;
+}
+function fetchStock(h){
+  pending++;
+  const code=normCode(h.code);
+  const s=document.createElement('script');
+  s.src='https://qt.gtimg.cn/q='+encodeURIComponent(code)+'&r='+Date.now();
+  s.charset='GBK';
+  s.onload=()=>{
+    try{
+      const v=window['v_'+code];
+      if(v&&v.indexOf('none_match')<0){
+        const a=v.split('~');
+        const price=parseFloat(a[3]);
+        const prev=parseFloat(a[4]);
+        if(price){h.price=price;}
+        if(price&&prev){h.day=(price/prev-1)*100;}
+        let t=a[30]||'';
+        t=t.replace(/^\d{4}[-\/]/,'').replace(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/,'$2-$3 $4:$5');
+        h.upd=t;
+        h._q=true;
+      }
+    }catch(e){}
+    dec();s.remove();
+  };
+  s.onerror=()=>{dec();s.remove();};
+  document.body.appendChild(s);
+}
+function dec(){pending--;if(pending<=0)finishQuote();}
+
+function finishQuote(){
+  if(quoteDone)return;
+  quoteDone=true;
+  clearTimeout(quoteGuard);
+  pending=0;
+  setBusy(false);
+  // 每次行情刷新后记录/更新今日快照
+  ensureDailySnapshot();
+  render();
+  const ok=data.filter(h=>h._q).length;
+  const total=data.filter(canQuote).length;
+  if(manualFlag){
+    if(total===0)toast('没有可自动取价的持仓');
+    else if(ok===0)toast('未取到行情，可能非交易时段或网络受限');
+    else toast('已更新 '+ok+'/'+total+' 项行情 · '+new Date().toLocaleTimeString('zh-CN'));
+    manualFlag=false;
+  }
+  document.getElementById('updateMeta').textContent='行情更新于 '+new Date().toLocaleTimeString('zh-CN')+' · QDII为收盘估值 · 数据存本机';
+}
+function refreshQuotes(manual){
+  const targets=data.filter(canQuote);
+  if(!targets.length){if(manual)toast('没有可自动取价的持仓（需填代码）');return;}
+  quoteDone=false;manualFlag=!!manual;pending=0;data.forEach(h=>h._q=false);
+  setBusy(true);
+  clearTimeout(quoteGuard);
+  quoteGuard=setTimeout(()=>{finishQuote();},8000);
+  targets.forEach(h=>{ if(h.type==='基金') fetchFund(h); else fetchStock(h); });
+}
+function toggleAuto(){
+  const on=document.getElementById('autoToggle').checked;
+  if(on){refreshQuotes(true);autoTimer=setInterval(()=>refreshQuotes(false),60000);}
+  else{clearInterval(autoTimer);autoTimer=null;}
+}
+
+/* ============ 联想搜索 ============ */
+let sugTimer=null, sugSeq=0;
+function onSearchInput(){
+  const kw=document.getElementById('f_name').value.trim();
+  const box=document.getElementById('sugbox');
+  if(kw.length<1){box.classList.remove('show');box.innerHTML='';return;}
+  clearTimeout(sugTimer);
+  sugTimer=setTimeout(()=>doSuggest(kw),260);
+}
+function doSuggest(kw){
+  const box=document.getElementById('sugbox');
+  box.innerHTML='<div class="sug-loading">搜索中…</div>';box.classList.add('show');
+  const seq=++sugSeq;
+  let merged=[], waiting=2, done=false;
+  const finish=()=>{ if(done)return; if(--waiting>0&&merged.length<3)return; done=true; if(seq===sugSeq)renderSug(merged); };
+  const hardGuard=setTimeout(()=>{done=true;if(seq===sugSeq)renderSug(merged);},6000);
+
+  const cbName='__sug_fund_'+seq;
+  window[cbName]=function(res){
+    try{(res&&res.Datas?res.Datas:[]).forEach(it=>{
+      const code=it.CODE||it._id||'';
+      const name=it.NAME||'';
+      const cat=it.CATEGORYDESC||(it.FundBaseInfo&&it.FundBaseInfo.FTYPE)||'基金';
+      let type='基金'; let qcode=code;
+      if(/ETF/i.test(name)&&!/联接/.test(name)){type='ETF';}
+      merged.push({code:qcode,name,cat,type,_src:'fund'});
+    });}catch(e){}
+    try{delete window[cbName];}catch(e){}; if(s1.parentNode)s1.remove();
+    finish();
+  };
+  const s1=document.createElement('script');
+  s1.src='https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?callback='+cbName+'&m=9&key='+encodeURIComponent(kw);
+  s1.onerror=()=>{if(s1.parentNode)s1.remove();finish();};
+  document.body.appendChild(s1);
+
+  const s2=document.createElement('script');
+  s2.charset='GBK';
+  s2.src='https://smartbox.gtimg.cn/s3/?v=2&q='+encodeURIComponent(kw)+'&t=all&r='+Date.now();
+  s2.onload=()=>{
+    try{
+      const hint=window.v_hint||'';
+      if(hint){
+        hint.split('^').forEach(seg=>{
+          const p=seg.split('~');
+          if(p.length>=3&&p[1]){
+            const mkt=p[0]; const num2=p[1]; let nm=p[2];
+            try{nm=nm.replace(/\\u([0-9a-fA-F]{4})/g,(m,h)=>String.fromCharCode(parseInt(h,16)));}catch(e){}
+            const qcode=(mkt+num2).replace(/^(sh|sz|hk|us|bj)/i,m=>m.toLowerCase());
+            const type=/ETF|基金/i.test(nm)?'ETF':'股票';
+            merged.push({code:qcode,name:nm,cat:(mkt.toUpperCase()+'股'),type,_src:'stock'});
+          }
+        });
+      }
+      window.v_hint='';
+    }catch(e){}
+    if(s2.parentNode)s2.remove();
+    finish();
+  };
+  s2.onerror=()=>{if(s2.parentNode)s2.remove();finish();};
+  document.body.appendChild(s2);
+}
+function renderSug(items){
+  const box=document.getElementById('sugbox');
+  if(!items||!items.length){box.innerHTML='<div class="sug-loading">无匹配，可手动输入代码</div>';return;}
+  const seen=new Set(); const uniq=[];
+  items.forEach(it=>{const k=(it.code||'')+'|'+(it.name||'');if(!seen.has(k)){seen.add(k);uniq.push(it);}});
+  box.innerHTML=uniq.slice(0,14).map(it=>{
+    return `<div class="sug-item" onclick='pickSug(${JSON.stringify(it).replace(/'/g,"&#39;")})'>
+        <div><div class="s-nm">${esc(it.name)}</div><div class="s-code">${esc(it.code)}</div></div>
+        <span class="s-type">${esc(it.cat||it.type||'产品')}</span></div>`;
+  }).join('');
+}
+function pickSug(it){
+  document.getElementById('f_name').value=it.name||'';
+  let code=it.code||'';
+  let type=it.type||'基金';
+  if(it._src==='stock'){
+    code=normCode(code);
+    type=/ETF/i.test(it.name)?'ETF':'股票';
+  }else{
+    type=/ETF/i.test(it.name)&&!/联接/.test(it.name)?'ETF':'基金';
+    if(type==='ETF'){type='基金';}
+  }
+  document.getElementById('f_code').value=code;
+  document.getElementById('f_type').value=type;
+  onTypeChange();
+  document.getElementById('sugbox').classList.remove('show');
+}
+document.addEventListener('click',e=>{
+  const box=document.getElementById('sugbox');
+  if(box&&!e.target.closest('.field'))box.classList.remove('show');
+});
+
+/* ============ 弹窗 ============ */
+function onTypeChange(){
+  const t=document.getElementById('f_type').value;
+  const lbl=document.getElementById('f_code_label');
+  const qb=document.getElementById('quoteBtn');
+  if(t==='基金'){lbl.textContent='基金代码（6位，用于自动取价）';qb.style.visibility='visible';}
+  else if(t==='股票'||t==='ETF'){lbl.textContent='行情代码（港股 hk09992 / 沪 sh600519 / 深 sz002385 / 美 usAAPL，填数字会自动补全）';qb.style.visibility='visible';}
+  else{lbl.textContent='代码（可选，此类型不支持自动取价）';qb.style.visibility='hidden';}
+}
+function onAcctSelect(){
+  const v=document.getElementById('f_acct').value;
+  document.getElementById('acctCustomWrap').style.display=(v==='__custom__')?'block':'none';
+}
+function onCurChange(){
+  const c=document.getElementById('f_cur').value;
+  const rate=FX[c]||FX_DEFAULT[c];
+  if(rate) document.getElementById('f_fx').value=(c==='CNY'?1:Number(rate.toFixed(4)));
+}
+function fillAcctOptions(selected){
+  const sel=document.getElementById('f_acct');
+  const base=['招商证券','工商银行','富途','建设银行','中国银行','农业银行','招商银行','支付宝','天天基金','华泰证券','中信证券','盈透 IBKR','微信理财通'];
+  const all=Array.from(new Set([...base,...customAccts,...data.map(h=>h.acct).filter(Boolean)]));
+  sel.innerHTML=all.map(a=>`<option>${esc(a)}</option>`).join('')+'<option value="__custom__">＋ 自定义…</option>';
+  if(selected&&all.includes(selected))sel.value=selected;
+  document.getElementById('acctCustomWrap').style.display='none';
+}
+function openAdd(){editId=null;document.getElementById('modalTitle').textContent='添加持仓';
+  ['f_name','f_code','f_shares','f_cost','f_price','f_day','f_date','f_acct_custom'].forEach(i=>document.getElementById(i).value='');
+  document.getElementById('f_type').selectedIndex=0;
+  fillAcctOptions();
+  document.getElementById('f_cur').value='CNY';
+  document.getElementById('f_fx').value=1;
+  document.getElementById('sugbox').classList.remove('show');
+  onTypeChange();
+  document.getElementById('mask').classList.add('show');}
+function openEdit(hid){
+  const h=data.find(x=>x.id===hid);if(!h)return;editId=hid;
+  document.getElementById('modalTitle').textContent='编辑持仓';
+  document.getElementById('f_name').value=h.name||'';
+  document.getElementById('f_code').value=h.code||'';
+  document.getElementById('f_type').value=h.type||'基金';
+  fillAcctOptions(h.acct||'招商证券');
+  document.getElementById('f_acct_custom').value='';
+  document.getElementById('f_date').value=h.date||'';
+  document.getElementById('f_shares').value=h.shares;
+  document.getElementById('f_cost').value=h.cost;
+  document.getElementById('f_price').value=h.price;
+  document.getElementById('f_day').value=h.day;
+  document.getElementById('f_cur').value=(h.cur in FX_DEFAULT)?h.cur:'CNY';
+  document.getElementById('f_fx').value=h.fx||1;
+  document.getElementById('sugbox').classList.remove('show');
+  onTypeChange();
+  document.getElementById('mask').classList.add('show');
+}
+function closeModal(){document.getElementById('mask').classList.remove('show');document.getElementById('sugbox').classList.remove('show');}
+
+function quoteInModal(){
+  const type=document.getElementById('f_type').value;
+  const code=document.getElementById('f_code').value.trim();
+  if(!code){toast('请先填写代码');return;}
+  if(type==='基金'){
+    window.jsonpgz=function(d){
+      if(d&&d.gsz){document.getElementById('f_price').value=d.gsz;document.getElementById('f_day').value=d.gszzl;
+        if(!document.getElementById('f_name').value&&d.name)document.getElementById('f_name').value=d.name;
+        toast('已取价：'+d.name+(/QDII/i.test(d.name)?'（QDII为收盘估值）':''));}
+      else toast('未取到该基金估值');
+      restoreJsonp();
+    };
+    const s=document.createElement('script');
+    s.src='https://fundgz.1234567.com.cn/js/'+encodeURIComponent(code)+'.js?rt='+Date.now();
+    s.onerror=()=>{toast('取价失败');restoreJsonp();s.remove();};
+    s.onload=()=>s.remove();
+    document.body.appendChild(s);
+  }else{
+    const code2=normCode(code);
+    if(code2!==code)document.getElementById('f_code').value=code2;
+    const s=document.createElement('script');
+    s.src='https://qt.gtimg.cn/q='+encodeURIComponent(code2)+'&r='+Date.now();
+    s.charset='GBK';
+    s.onload=()=>{
+      try{const v=window['v_'+code2];
+        if(v&&v.indexOf('none_match')<0){const a=v.split('~');const p=parseFloat(a[3]),pv=parseFloat(a[4]);
+          if(p){document.getElementById('f_price').value=p;}
+          if(p&&pv){document.getElementById('f_day').value=(p/pv-1)*100;}
+          if(!document.getElementById('f_name').value&&a[1])document.getElementById('f_name').value=a[1];
+          toast('已取价：'+(a[1]||code2));}
+        else toast('未取到行情，请确认代码');
+      }catch(e){toast('解析失败');}
+      s.remove();
+    };
+    s.onerror=()=>{toast('取价失败');s.remove();};
+    document.body.appendChild(s);
+  }
+}
+function restoreJsonp(){
+  window.jsonpgz=function(d){
+    if(!d||!d.fundcode)return;
+    const matches=data.filter(x=>x.code===d.fundcode);
+    matches.forEach(h=>{
+      if(h){if(d.gsz)h.price=num(d.gsz);if(d.gszzl)h.day=num(d.gszzl);h.upd=(d.gztime||'').replace(/^\d{4}-/,'')+(isQDII(h)?'(收盘)':'');h._q=true;}
+    });
+    dec();
+  };
+}
+
+function saveHolding(){
+  const name=document.getElementById('f_name').value.trim();
+  const shares=document.getElementById('f_shares').value;
+  const cost=document.getElementById('f_cost').value;
+  const price=document.getElementById('f_price').value;
+  if(!name){alert('请填写产品名称');return;}
+  if(shares===''||cost===''||price===''){alert('请填写份额、成本价和当前价');return;}
+  let acct=document.getElementById('f_acct').value;
+  if(acct==='__custom__'){
+    acct=document.getElementById('f_acct_custom').value.trim();
+    if(!acct){alert('请输入自定义账户名称');return;}
+    if(!customAccts.includes(acct)){customAccts.push(acct);saveAccts();}
+  }
+  const obj={
+    name,code:document.getElementById('f_code').value.trim(),
+    type:document.getElementById('f_type').value,
+    acct,
+    date:document.getElementById('f_date').value,
+    shares:num(shares),cost:num(cost),price:num(price),
+    day:num(document.getElementById('f_day').value),
+    cur:document.getElementById('f_cur').value,
+    fx:num(document.getElementById('f_fx').value)||1
+  };
+  if(editId){
+    const h=data.find(x=>x.id===editId);
+    Object.assign(h,obj);
+    if(!canQuote(h))h.upd='手动 '+new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+  }else{
+    obj.id=id();
+    if(!canQuote(obj))obj.upd='手动 '+new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    // 新增持仓时初始化 trades
+    obj.trades=[{date:obj.date||todayKey(),shares:num(shares),price:num(cost),type:'buy'}];
+    data.push(obj);
+  }
+  closeModal();render();
+  // 新增/编辑后自动刷新行情
+  setTimeout(()=>refreshQuotes(false),300);
+}
+function del(hid){if(confirm('确定删除这条持仓？')){data=data.filter(x=>x.id!==hid);if(acctFilter!=='全部'&&!data.some(h=>(h.acct||'其他')===acctFilter))acctFilter='全部';render();}}
+function clearAll(){if(confirm('确定清空所有持仓？此操作不可恢复。')){data=[];acctFilter='全部';render();}}
+
+/* ============ 增持/减持 ============ */
+function openTrade(hid,type){
+  const h=data.find(x=>x.id===hid);
+  if(!h)return;
+  ensureTrades(h);
+  tradeTarget={id:hid,type};
+  const isBuy=type==='buy';
+  document.getElementById('tradeTitle').textContent=isBuy?'增持 · '+h.name:'减持 · '+h.name;
+  document.getElementById('tradeSharesLabel').textContent=isBuy?'增持份额 *':'减持份额 *';
+  document.getElementById('tradePriceLabel').textContent=isBuy?'买入价格 *':'卖出价格 *';
+  document.getElementById('t_shares').value='';
+  document.getElementById('t_price').value=isBuy?'':num(h.price);
+  document.getElementById('t_date').value=todayKey();
+  document.getElementById('t_fee').value='';
+  document.getElementById('t_fee_tip').textContent='';
+  document.getElementById('tradeHoldingInfo').innerHTML=
+    `当前持有：<b>${fmt(num(h.shares),num(h.shares)%1?2:0)} 份</b> · 成本均价 <b>${fmt(num(h.cost),4)}</b> · 现价 <b>${fmt(num(h.price),4)}</b>` +
+    `<br>费率类型：<b>${getFeeType(h)}</b>`;
+  document.getElementById('tradePreview').style.display='none';
+  document.getElementById('tradeSaveBtn').textContent=isBuy?'确认增持':'确认减持';
+  document.getElementById('tradeMask').classList.add('show');
+}
+function closeTradeModal(){document.getElementById('tradeMask').classList.remove('show');tradeTarget=null;}
+
+function recalcFee(){
+  if(!tradeTarget)return;
+  const h=data.find(x=>x.id===tradeTarget.id);
+  if(!h)return;
+  const tShares=num(document.getElementById('t_shares').value);
+  const tPrice=num(document.getElementById('t_price').value);
+  if(!tShares||!tPrice){toast('请先填写份额和价格');return;}
+  const fee=calcFee(h,tShares,tPrice,tradeTarget.type);
+  const feeEl=document.getElementById('t_fee');
+  feeEl.value=fee.total>0?fmt(fee.total,2):'';
+  feeEl._auto=true;
+  document.getElementById('t_fee_tip').textContent=fee.detail;
+  updateTradePreview();
+}
+
+function updateTradePreview(){
+  if(!tradeTarget)return;
+  const h=data.find(x=>x.id===tradeTarget.id);
+  if(!h)return;
+  const tShares=num(document.getElementById('t_shares').value);
+  const tPrice=num(document.getElementById('t_price').value);
+  const tFee=num(document.getElementById('t_fee').value);
+  const isBuy=tradeTarget.type==='buy';
+  const oldShares=num(h.shares);
+  const oldCost=num(h.cost);
+  const fx=num(h.fx)||1;
+  const prev=document.getElementById('tradePreview');
+
+  // 自动计算手续费并填入（仅在用户未手动编辑过时自动填入）
+  if(tShares&&tPrice){
+    const autoFee=calcFee(h,tShares,tPrice,tradeTarget.type);
+    const feeEl=document.getElementById('t_fee');
+    const tipEl=document.getElementById('t_fee_tip');
+    // 仅在用户未手动修改时自动填入
+    if(!feeEl.value || feeEl._auto){
+      feeEl.value=autoFee.total>0?fmt(autoFee.total,2):'';
+      feeEl._auto=true;
+    }
+    tipEl.textContent=autoFee.detail;
+  }
+
+  const fee=num(document.getElementById('t_fee').value)||0;
+  const feeCNY=fee*fx;
+
+  if(!tShares||!tPrice){prev.style.display='none';return;}
+
+  let html='';
+  if(isBuy){
+    const newShares=oldShares+tShares;
+    // 手续费纳入成本：总成本 = 旧份额×旧均价 + 新份额×新价格 + 手续费
+    const newAvgCost=(oldShares*oldCost+tShares*tPrice+fee)/newShares;
+    const totalInvest=tShares*tPrice*fx+feeCNY;
+    html=`
+      <div class="row"><span class="lbl">原持有</span><span class="val">${fmt(oldShares,0)} 份 × ${fmt(oldCost,4)}</span></div>
+      <div class="row"><span class="lbl">本次增持</span><span class="val">${fmt(tShares,0)} 份 × ${fmt(tPrice,4)}</span></div>
+      <div class="row"><span class="lbl">手续费</span><span class="val" style="color:var(--gold)">${rowMoney(h,feeCNY)}</span></div>
+      <div class="divider"></div>
+      <div class="row"><span class="lbl">增持后总份额</span><span class="val">${fmt(newShares,0)} 份</span></div>
+      <div class="row"><span class="lbl">新成本均价</span><span class="val up">${fmt(newAvgCost,4)}</span></div>
+      <div class="row"><span class="lbl">本次投入(含手续费)</span><span class="val">${rowMoney(h,totalInvest)}</span></div>
+    `;
+  }else{
+    if(tShares>oldShares){
+      html=`<div class="row" style="color:var(--up)">减持份额不能超过当前持有 ${fmt(oldShares,0)} 份</div>`;
+    }else{
+      const remainShares=oldShares-tShares;
+      // 已实现收益 = (卖出价 - 均价) × 份额 × 汇率 - 手续费 × 汇率
+      const realizedPnl=(tPrice-oldCost)*tShares*fx-feeCNY;
+      const realizedPct=oldCost?(tPrice/oldCost-1)*100:0;
+      html=`
+        <div class="row"><span class="lbl">原持有</span><span class="val">${fmt(oldShares,0)} 份 × 均价 ${fmt(oldCost,4)}</span></div>
+        <div class="row"><span class="lbl">本次减持</span><span class="val">${fmt(tShares,0)} 份 × ${fmt(tPrice,4)}</span></div>
+        <div class="row"><span class="lbl">手续费</span><span class="val" style="color:var(--gold)">${rowMoney(h,feeCNY)}</span></div>
+        <div class="divider"></div>
+        <div class="row"><span class="lbl">减持后剩余</span><span class="val">${fmt(remainShares,0)} 份</span></div>
+        <div class="row"><span class="lbl">成本均价不变</span><span class="val">${fmt(oldCost,4)}</span></div>
+        <div class="row"><span class="lbl">本次回收(扣费后)</span><span class="val">${rowMoney(h,tShares*tPrice*fx-feeCNY)}</span></div>
+        <div class="row"><span class="lbl">已实现收益(扣费后)</span><span class="val ${cls(realizedPnl)}">${sign(realizedPnl)}${moneyCNY(realizedPnl)} (${sign(realizedPct)}${fmt(realizedPct,2)}%)</span></div>
+      `;
+    }
+  }
+  prev.innerHTML=html;
+  prev.style.display='block';
+}
+
+function saveTrade(){
+  if(!tradeTarget)return;
+  const h=data.find(x=>x.id===tradeTarget.id);
+  if(!h)return;
+  const tShares=num(document.getElementById('t_shares').value);
+  const tPrice=num(document.getElementById('t_price').value);
+  const tFee=num(document.getElementById('t_fee').value)||0;
+  const tDate=document.getElementById('t_date').value||todayKey();
+  const isBuy=tradeTarget.type==='buy';
+
+  if(!tShares||tShares<=0){alert('请输入有效份额');return;}
+  if(!tPrice||tPrice<=0){alert('请输入有效价格');return;}
+
+  ensureTrades(h);
+  const oldShares=num(h.shares);
+  const oldCost=num(h.cost);
+  const fx=num(h.fx)||1;
+
+  if(isBuy){
+    // 增持：加权平均成本（手续费纳入成本）
+    const newShares=oldShares+tShares;
+    const newAvgCost=(oldShares*oldCost+tShares*tPrice+tFee)/newShares;
+    h.shares=newShares;
+    h.cost=newAvgCost;
+    h.trades.push({date:tDate,shares:tShares,price:tPrice,type:'buy',fee:tFee});
+    // 更新购买日期为最早买入日
+    const allBuyDates=h.trades.filter(t=>t.type==='buy').map(t=>t.date).filter(Boolean).sort();
+    if(allBuyDates.length)h.date=allBuyDates[0];
+    toast('已增持 '+fmt(tShares,0)+' 份 · 新均价 '+fmt(newAvgCost,4)+' · 手续费 '+fmt(tFee,2));
+  }else{
+    // 减持
+    if(tShares>oldShares){alert('减持份额不能超过当前持有 '+fmt(oldShares,0)+' 份');return;}
+    const remainShares=oldShares-tShares;
+    h.shares=remainShares;
+    h.trades.push({date:tDate,shares:tShares,price:tPrice,type:'sell',fee:tFee});
+    const realizedPnl=(tPrice-oldCost)*tShares*fx-tFee*fx;
+    if(remainShares===0){
+      // 清仓：提示是否删除
+      if(confirm('已全部减持，收益 '+sign(realizedPnl)+moneyCNY(realizedPnl)+' (已扣手续费)。是否删除该持仓？')){
+        data=data.filter(x=>x.id!==h.id);
+        if(acctFilter!=='全部'&&!data.some(x=>(x.acct||'其他')===acctFilter))acctFilter='全部';
+      }
+    }
+    toast('已减持 '+fmt(tShares,0)+' 份 · 已实现收益(扣费) '+sign(realizedPnl)+moneyCNY(realizedPnl));
+  }
+
+  closeTradeModal();
+  render();
+  // 交易后刷新行情
+  setTimeout(()=>refreshQuotes(false),300);
+}
+
+/* ============ 费率设置 ============ */
+function openFeeCfg(){
+  const body=document.getElementById('feeCfgBody');
+  let html='';
+  const types=['A股','港股','基金','债券/理财'];
+  types.forEach(t=>{
+    const cfg=FEE_CFG[t]||{};
+    html+=`<div style="margin-bottom:18px;padding:12px 14px;background:var(--panel-2);border:1px solid var(--line);border-radius:10px">`;
+    html+=`<div style="font-weight:700;margin-bottom:8px;font-size:14px">${t}</div>`;
+    if(t==='A股'){
+      html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <label style="font-size:12px;color:var(--txt-dim)">佣金费率 <input id="fc_a_commission" type="number" step="any" value="${cfg.commissionRate||0}" style="width:80px;margin-left:4px" onchange="this.value=this.value"> (如 0.00025 = 万2.5)</label>
+        <label style="font-size:12px;color:var(--txt-dim)">最低佣金(元) <input id="fc_a_min" type="number" step="any" value="${cfg.commissionMin||0}" style="width:80px;margin-left:4px"></label>
+        <label style="font-size:12px;color:var(--txt-dim)">印花税率(卖出) <input id="fc_a_stamp" type="number" step="any" value="${cfg.stampRate||0}" style="width:80px;margin-left:4px"> (如 0.0005 = 万5)</label>
+        <label style="font-size:12px;color:var(--txt-dim)">过户费率 <input id="fc_a_transfer" type="number" step="any" value="${cfg.transferRate||0}" style="width:80px;margin-left:4px"> (如 0.00001)</label>
+      </div>`;
+    }else if(t==='港股'){
+      html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <label style="font-size:12px;color:var(--txt-dim)">佣金费率 <input id="fc_hk_commission" type="number" step="any" value="${cfg.commissionRate||0}" style="width:80px;margin-left:4px"></label>
+        <label style="font-size:12px;color:var(--txt-dim)">最低佣金(HK$) <input id="fc_hk_min" type="number" step="any" value="${cfg.commissionMin||0}" style="width:80px;margin-left:4px"></label>
+        <label style="font-size:12px;color:var(--txt-dim)">印花税率(买卖) <input id="fc_hk_stamp" type="number" step="any" value="${cfg.stampRate||0}" style="width:80px;margin-left:4px"></label>
+        <label style="font-size:12px;color:var(--txt-dim)">交易征费率 <input id="fc_hk_levy" type="number" step="any" value="${cfg.levyRate||0}" style="width:80px;margin-left:4px"></label>
+        <label style="font-size:12px;color:var(--txt-dim)">交收费率 <input id="fc_hk_ccass" type="number" step="any" value="${cfg.ccassRate||0}" style="width:80px;margin-left:4px"></label>
+        <label style="font-size:12px;color:var(--txt-dim)">联交所交易费率 <input id="fc_hk_exchange" type="number" step="any" value="${cfg.exchangeRate||0}" style="width:80px;margin-left:4px"></label>
+        <label style="font-size:12px;color:var(--txt-dim)">中央结算费率 <input id="fc_hk_settlement" type="number" step="any" value="${cfg.settlementRate||0}" style="width:80px;margin-left:4px"></label>
+      </div>`;
+    }else if(t==='基金'){
+      html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <label style="font-size:12px;color:var(--txt-dim)">申购费率 <input id="fc_f_subscribe" type="number" step="any" value="${cfg.subscribeRate||0}" style="width:80px;margin-left:4px"> (如 0.0015 = 0.15%)</label>
+        <label style="font-size:12px;color:var(--txt-dim)">赎回费按持有天数递减（下方表格）</label>
+      </div>`;
+      html+=`<table style="width:100%;margin-top:6px;font-size:12px;border-collapse:collapse">
+        <tr style="color:var(--txt-dim)"><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">持有天数 &lt;</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">赎回费率</th></tr>`;
+      const rates=cfg.redeemRates||[];
+      rates.forEach((r,i)=>{
+        html+=`<tr><td style="padding:4px 8px"><input id="fc_f_rd_${i}" type="number" step="any" value="${r.days===Infinity?'':r.days}" style="width:80px" placeholder="∞"></td>
+          <td style="padding:4px 8px"><input id="fc_f_rr_${i}" type="number" step="any" value="${r.rate}" style="width:80px"></td></tr>`;
+      });
+      html+=`</table>`;
+    }else{
+      html+=`<div style="font-size:12px;color:var(--txt-dim)">无手续费</div>`;
+    }
+    html+=`</div>`;
+  });
+  html+=`<div style="font-size:11px;color:var(--txt-dim);margin-top:6px;line-height:1.6">
+    💡 费率格式说明：0.00025 = 万分之2.5 = 0.025%；0.0015 = 千分之1.5 = 0.15%<br>
+    A股：佣金买卖均收(最低5元) + 过户费买卖均收 + 印花税仅卖出收取<br>
+    港股：佣金买卖均收 + 印花税买卖均收 + 交易征费 + 交收费 + 联交所交易费 + 中央结算费<br>
+    基金：申购费仅买入收取 + 赎回费仅卖出收取(按持有天数阶梯递减)<br>
+    手续费在增持时纳入成本均价，在减持时从已实现收益中扣除
+  </div>`;
+  body.innerHTML=html;
+  document.getElementById('feeCfgMask').classList.add('show');
+}
+function closeFeeCfg(){document.getElementById('feeCfgMask').classList.remove('show');}
+
+function saveFeeCfgUI(){
+  FEE_CFG['A股']={
+    commissionRate:num(document.getElementById('fc_a_commission').value),
+    commissionMin:num(document.getElementById('fc_a_min').value),
+    stampRate:num(document.getElementById('fc_a_stamp').value),
+    stampSellOnly:true,
+    transferRate:num(document.getElementById('fc_a_transfer').value)
+  };
+  FEE_CFG['港股']={
+    commissionRate:num(document.getElementById('fc_hk_commission').value),
+    commissionMin:num(document.getElementById('fc_hk_min').value),
+    stampRate:num(document.getElementById('fc_hk_stamp').value),
+    stampSellOnly:false,
+    levyRate:num(document.getElementById('fc_hk_levy').value),
+    ccassRate:num(document.getElementById('fc_hk_ccass').value),
+    exchangeRate:num(document.getElementById('fc_hk_exchange').value),
+    settlementRate:num(document.getElementById('fc_hk_settlement').value)
+  };
+  const redeemRates=[];
+  for(let i=0;i<4;i++){
+    const dEl=document.getElementById('fc_f_rd_'+i);
+    const rEl=document.getElementById('fc_f_rr_'+i);
+    if(!dEl||!rEl)continue;
+    const d=num(dEl.value)||Infinity;
+    const r=num(rEl.value);
+    redeemRates.push({days:d,rate:r});
+  }
+  // 按天数升序排列
+  redeemRates.sort((a,b)=>a.days-b.days);
+  FEE_CFG['基金']={
+    subscribeRate:num(document.getElementById('fc_f_subscribe').value),
+    redeemRates
+  };
+  saveFeeCfg();
+  closeFeeCfg();
+  toast('费率设置已保存');
+}
+function resetFeeCfg(){
+  if(!confirm('确定恢复默认费率？'))return;
+  FEE_CFG=JSON.parse(JSON.stringify(FEE_CFG_DEFAULT));
+  saveFeeCfg();
+  openFeeCfg(); // 重新渲染
+  toast('已恢复默认费率');
+}
+
+/* ============ 导出 Excel ============ */
+const _crcTable=(()=>{const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c>>>0;}return t;})();
+function crc32(bytes){let c=0xFFFFFFFF;for(let i=0;i<bytes.length;i++)c=_crcTable[(c^bytes[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+function strBytes(s){return new TextEncoder().encode(s);}
+function zipFiles(files){
+  const enc=[]; let offset=0; const central=[];
+  const u16=v=>[v&0xFF,(v>>8)&0xFF];
+  const u32=v=>[v&0xFF,(v>>8)&0xFF,(v>>16)&0xFF,(v>>24)&0xFF];
+  files.forEach(f=>{
+    const nameB=strBytes(f.name), data=f.data, crc=crc32(data);
+    const local=[].concat([0x50,0x4b,0x03,0x04],u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(data.length),u32(data.length),u16(nameB.length),u16(0));
+    enc.push(new Uint8Array(local)); enc.push(nameB); enc.push(data);
+    const cen=[].concat([0x50,0x4b,0x01,0x02],u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(data.length),u32(data.length),u16(nameB.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset));
+    central.push(new Uint8Array(cen)); central.push(nameB);
+    offset+=local.length+nameB.length+data.length;
+  });
+  let cenSize=0; central.forEach(b=>cenSize+=b.length);
+  const end=new Uint8Array([].concat([0x50,0x4b,0x05,0x06],u16(0),u16(0),u16(files.length),u16(files.length),u32(cenSize),u32(offset),u16(0)));
+  const all=[...enc,...central,end];
+  let total=0; all.forEach(b=>total+=b.length);
+  const out=new Uint8Array(total); let p=0; all.forEach(b=>{out.set(b,p);p+=b.length;});
+  return out;
+}
+function colLetter(c){let s='';while(c>0){const m=(c-1)%26;s=String.fromCharCode(65+m)+s;c=Math.floor((c-1)/26);}return s;}
+
+/* ============ 导出 / 导入 / 模板（统一多表格式）============ */
+/* 工作表1=持仓明细  工作表2=交易记录  工作表3=费率配置
+   导出、模板、导入三者格式完全一致，导出文件可直接用于导入 */
+
+function xmlEsc(s){return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[m]));}
+function makeCell(col,row,val,opt){
+  const ref=colLetter(col)+row;
+  if(opt&&opt.str) return '<c r="'+ref+'" t="inlineStr"><is><t>'+xmlEsc(val)+'</t></is></c>';
+  return '<c r="'+ref+'"'+(opt&&opt.s?' s="'+opt.s+'"':'')+'><v>'+val+'</v></c>';
+}
+function buildSheetXml(colsXml,rowsXml,mergesXml){
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+    colsXml+'<sheetData>'+rowsXml.join('')+'</sheetData>'+(mergesXml||'')+'</worksheet>';
+}
+const STYLES_XML='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+  '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+  '<numFmts count="1"><numFmt numFmtId="164" formatCode="0.00%"/></numFmts>'+
+  '<fonts count="4">'+
+    '<font><sz val="11"/><name val="宋体"/></font>'+
+    '<font><b/><sz val="16"/><color rgb="FF1B4FC4"/><name val="宋体"/></font>'+
+    '<font><sz val="10"/><color rgb="FF666666"/><name val="宋体"/></font>'+
+    '<font><b/><color rgb="FFFFFFFF"/><name val="宋体"/></font>'+
+  '</fonts>'+
+  '<fills count="4">'+
+    '<fill><patternFill patternType="none"/></fill>'+
+    '<fill><patternFill patternType="gray125"/></fill>'+
+    '<fill><patternFill patternType="solid"><fgColor rgb="FF2F7BFF"/></fill>'+
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFE8F0FF"/></fill>'+
+  '</fills>'+
+  '<borders count="1"><border/></borders>'+
+  '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
+  '<cellXfs count="7">'+
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'+
+    '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'+
+    '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>'+
+    '<xf numFmtId="0" fontId="3" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>'+
+    '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'+
+    '<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"><alignment/></xf>'+
+    '<xf numFmtId="164" fontId="0" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1"/>'+
+  '</cellXfs>'+
+  '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'+
+  '</styleSheet>';
+
+function buildFeeConfigRows(){
+  const rows=[];
+  const a=FEE_CFG['A股']||FEE_CFG_DEFAULT['A股'];
+  rows.push(['A股','佣金费率',a.commissionRate,'按成交金额比例']);
+  rows.push(['A股','最低佣金(元)',a.commissionMin,'单笔最低']);
+  rows.push(['A股','印花税率',a.stampRate,'']);
+  rows.push(['A股','印花税仅卖出',a.stampSellOnly?'是':'否','']);
+  rows.push(['A股','过户费率',a.transferRate,'']);
+  const hk=FEE_CFG['港股']||FEE_CFG_DEFAULT['港股'];
+  rows.push(['港股','佣金费率',hk.commissionRate,'']);
+  rows.push(['港股','最低佣金(元)',hk.commissionMin,'']);
+  rows.push(['港股','印花税率',hk.stampRate,'']);
+  rows.push(['港股','交易征费率',hk.levyRate,'']);
+  rows.push(['港股','中央结算费率',hk.ccassRate,'']);
+  rows.push(['港股','交易费率',hk.exchangeRate,'']);
+  rows.push(['港股','结算费率',hk.settlementRate,'']);
+  const f=FEE_CFG['基金']||FEE_CFG_DEFAULT['基金'];
+  rows.push(['基金','申购费率',f.subscribeRate,'']);
+  (f.redeemRates||[]).forEach((rr,i)=>{
+    let label;
+    if(rr.days===Infinity){const prev=f.redeemRates[i-1]?f.redeemRates[i-1].days:365;label='赎回费率(>'+prev+'天)';}
+    else label='赎回费率(≤'+rr.days+'天)';
+    rows.push(['基金',label,rr.rate,'']);
+  });
+  const b=FEE_CFG['债券/理财']||FEE_CFG_DEFAULT['债券/理财'];
+  rows.push(['债券/理财','固定费率',b.flatRate,'无手续费']);
+  return rows;
+}
+
+function generateXlsx(xlsxData,filename){
+  const E=xmlEsc;
+  /* --- Sheet 1: 持仓明细 --- */
+  const h1=['序号','名称','代码','类型','账户','购买日期','份额','成本价','当前价','当日涨跌幅%','计价币种','汇率(对人民币)'];
+  const r1=[];
+  r1.push('<row r="1" ht="26" customHeight="1"><c r="A1" s="1" t="inlineStr"><is><t>我的资产持仓收益表</t></is></c></row>');
+  r1.push('<row r="2" ht="16" customHeight="1"><c r="A2" s="2" t="inlineStr"><is><t>'+E('导出时间：'+new Date().toLocaleString('zh-CN')+'　|　持仓 '+xlsxData.length+' 项　|　交易记录见"交易记录"表，费率见"费率配置"表')+'</t></is></c></row>');
+  let hc1='';h1.forEach((h,i)=>{hc1+='<c r="'+colLetter(i+1)+'3" s="3" t="inlineStr"><is><t>'+E(h)+'</t></is></c>';});
+  r1.push('<row r="3">'+hc1+'</row>');
+  xlsxData.forEach((h,i)=>{
+    const r=4+i;
+    let row='<row r="'+r+'">';
+    row+=makeCell(1,r,i+1);
+    row+=makeCell(2,r,h.name,{str:1});
+    row+=makeCell(3,r,h.code||'',{str:1});
+    row+=makeCell(4,r,h.type||'',{str:1});
+    row+=makeCell(5,r,h.acct||'',{str:1});
+    row+=makeCell(6,r,h.date||'',{str:1});
+    row+=makeCell(7,r,num(h.shares));
+    row+=makeCell(8,r,num(h.cost));
+    row+=makeCell(9,r,num(h.price));
+    row+=makeCell(10,r,num(h.day));
+    row+=makeCell(11,r,curShort(h.cur)||'CNY',{str:1});
+    row+=makeCell(12,r,num(h.fx)||1);
+    row+='</row>';
+    r1.push(row);
+  });
+  const nr1=4+xlsxData.length+1;
+  r1.push('<row r="'+nr1+'"><c r="A'+nr1+'" s="2" t="inlineStr"><is><t>'+E('说明：① 此文件可直接用于"导入"功能，完整恢复持仓+交易记录+费率配置；② 港股/美股请把"计价币种"填对应外币并核对汇率列；③ 手续费在增持时纳入成本均价、在减持时从收益中扣除。')+'</t></is></c></row>');
+  const sheet1Xml=buildSheetXml(
+    '<cols><col min="1" max="1" width="6"/><col min="2" max="2" width="28"/><col min="3" max="3" width="14"/><col min="4" max="4" width="9"/><col min="5" max="5" width="11"/><col min="6" max="6" width="12"/><col min="7" max="12" width="13"/></cols>',
+    r1,'<mergeCells count="2"><mergeCell ref="A1:L1"/><mergeCell ref="A2:L2"/></mergeCells>');
+
+  /* --- Sheet 2: 交易记录 --- */
+  const h2=['持仓序号','持仓名称','交易类型','交易日期','份额','成交价格','手续费','币种'];
+  const r2=[];
+  r2.push('<row r="1" ht="26" customHeight="1"><c r="A1" s="1" t="inlineStr"><is><t>交易记录明细</t></is></c></row>');
+  r2.push('<row r="2" ht="16" customHeight="1"><c r="A2" s="2" t="inlineStr"><is><t>'+E('"持仓序号"对应"持仓明细"表中的序号列')+'</t></is></c></row>');
+  let hc2='';h2.forEach((h,i)=>{hc2+='<c r="'+colLetter(i+1)+'3" s="3" t="inlineStr"><is><t>'+E(h)+'</t></is></c>';});
+  r2.push('<row r="3">'+hc2+'</row>');
+  let ri=4;
+  xlsxData.forEach((h,idx)=>{
+    ensureTrades(h);
+    h.trades.forEach(tr=>{
+      let row='<row r="'+ri+'">';
+      row+=makeCell(1,ri,idx+1);
+      row+=makeCell(2,ri,h.name,{str:1});
+      row+=makeCell(3,ri,tr.type==='buy'?'买入':'卖出',{str:1});
+      row+=makeCell(4,ri,tr.date||'',{str:1});
+      row+=makeCell(5,ri,num(tr.shares));
+      row+=makeCell(6,ri,num(tr.price));
+      row+=makeCell(7,ri,num(tr.fee));
+      row+=makeCell(8,ri,curShort(h.cur)||'CNY',{str:1});
+      row+='</row>';
+      r2.push(row);
+      ri++;
+    });
+  });
+  const sheet2Xml=buildSheetXml(
+    '<cols><col min="1" max="1" width="9"/><col min="2" max="2" width="28"/><col min="3" max="3" width="9"/><col min="4" max="4" width="12"/><col min="5" max="8" width="13"/></cols>',
+    r2,'<mergeCells count="2"><mergeCell ref="A1:H1"/><mergeCell ref="A2:H2"/></mergeCells>');
+
+  /* --- Sheet 3: 费率配置 --- */
+  const h3=['费率类型','参数名','参数值','说明'];
+  const r3=[];
+  r3.push('<row r="1" ht="26" customHeight="1"><c r="A1" s="1" t="inlineStr"><is><t>费率配置</t></is></c></row>');
+  r3.push('<row r="2" ht="16" customHeight="1"><c r="A2" s="2" t="inlineStr"><is><t>'+E('导入时会自动恢复以下费率设置')+'</t></is></c></row>');
+  let hc3='';h3.forEach((h,i)=>{hc3+='<c r="'+colLetter(i+1)+'3" s="3" t="inlineStr"><is><t>'+E(h)+'</t></is></c>';});
+  r3.push('<row r="3">'+hc3+'</row>');
+  const feeRows=buildFeeConfigRows();
+  feeRows.forEach((fr,i)=>{
+    const r=4+i;
+    let row='<row r="'+r+'">';
+    row+=makeCell(1,r,fr[0],{str:1});
+    row+=makeCell(2,r,fr[1],{str:1});
+    row+=makeCell(3,r,fr[2],{str:1});
+    row+=makeCell(4,r,fr[3]||'',{str:1});
+    row+='</row>';
+    r3.push(row);
+  });
+  const sheet3Xml=buildSheetXml(
+    '<cols><col min="1" max="1" width="12"/><col min="2" max="2" width="20"/><col min="3" max="3" width="14"/><col min="4" max="4" width="30"/></cols>',
+    r3,'<mergeCells count="2"><mergeCell ref="A1:D1"/><mergeCell ref="A2:D2"/></mergeCells>');
+
+  /* --- Assemble xlsx --- */
+  const contentTypes='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
+    '<Default Extension="xml" ContentType="application/xml"/>'+
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
+    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'+
+    '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'+
+    '<Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'+
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+
+    '</Types>';
+  const rels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'+
+    '</Relationships>';
+  const wbXml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
+    '<sheets>'+
+    '<sheet name="持仓明细" sheetId="1" r:id="rId1"/>'+
+    '<sheet name="交易记录" sheetId="2" r:id="rId2"/>'+
+    '<sheet name="费率配置" sheetId="3" r:id="rId3"/>'+
+    '</sheets></workbook>';
+  const wbRels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'+
+    '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>'+
+    '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/>'+
+    '<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'+
+    '</Relationships>';
+  const files=[
+    {name:'[Content_Types].xml',data:strBytes(contentTypes)},
+    {name:'_rels/.rels',data:strBytes(rels)},
+    {name:'xl/workbook.xml',data:strBytes(wbXml)},
+    {name:'xl/_rels/workbook.xml.rels',data:strBytes(wbRels)},
+    {name:'xl/styles.xml',data:strBytes(STYLES_XML)},
+    {name:'xl/worksheets/sheet1.xml',data:strBytes(sheet1Xml)},
+    {name:'xl/worksheets/sheet2.xml',data:strBytes(sheet2Xml)},
+    {name:'xl/worksheets/sheet3.xml',data:strBytes(sheet3Xml)},
+  ];
+  const zip=zipFiles(files);
+  const blob=new Blob([zip],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  triggerDownload(blob,filename);
+}
+
+function exportExcel(){
+  generateXlsx(data,'我的持仓_'+new Date().toISOString().slice(0,10)+'.xlsx');
+}
+
+/* ============ 导入 ============ */
+function handleImport(e){
+  const file=e.target.files[0];if(!file)return;
+  const name=(file.name||'').toLowerCase();
+  if(name.endsWith('.xlsx')){
+    const fr=new FileReader();
+    fr.onload=ev=>{ importXlsx(new Uint8Array(ev.target.result)); e.target.value=''; };
+    fr.onerror=()=>{alert('读取文件失败');e.target.value='';};
+    fr.readAsArrayBuffer(file);
+  }else{
+    const fr=new FileReader();
+    fr.onload=ev=>{ importCsvText(ev.target.result); e.target.value=''; };
+    fr.onerror=()=>{alert('读取文件失败');e.target.value='';};
+    fr.readAsText(file);
+  }
+}
+function importCsvText(raw){
+  try{
+    const text=String(raw).replace(/^\ufeff/,'');
+    const lines=text.split(/\r?\n/).filter(l=>l.trim());
+    const out=[];
+    for(let i=1;i<lines.length;i++){
+      const c=parseLine(lines[i]);
+      if(c.length<8)continue;
+      const v0=String(c[0]||'').trim();
+      if(!v0||/^合计/.test(v0)||v0==='说明'||v0==='序号'||v0==='名称')continue;
+      out.push(rowToHolding(c));
+    }
+    out.forEach(h=>{if(!h.trades.length)ensureTrades(h);});
+    commitImport(out);
+  }catch(err){alert('导入失败，请确认是本工具导出的CSV或模板格式');}
+}
+function rowToHolding(c){
+  /* 兼容新旧格式：新格式第1列为序号(数字)，旧格式第1列为名称 */
+  const offset=(c[0]&&/^\d+$/.test(String(c[0]).trim()))?1:0;
+  const h={id:id(),name:c[offset]||'',code:c[offset+1]||'',type:c[offset+2]||'基金',acct:c[offset+3]||'其他',date:c[offset+4]||'',
+    shares:num(c[offset+5]),cost:num(c[offset+6]),price:num(c[offset+7]),day:num(c[offset+8]),
+    cur:(c[offset+9]||'CNY').replace(/\s.*$/,''),fx:num(c[offset+10])||1,trades:[]};
+  return h;
+}
+function commitImport(out){
+  if(!out.length){alert('未解析到有效数据。请确认表格列顺序与模板一致');return;}
+  if(confirm('导入 '+out.length+' 条持仓？将【替换】当前所有数据。')){
+    data=out;acctFilter='全部';
+    out.forEach(h=>{if(h.acct&&!customAccts.includes(h.acct))customAccts.push(h.acct);});saveAccts();
+    render();fetchFxRates();setTimeout(()=>refreshQuotes(false),400);
+    toast('已导入 '+out.length+' 条持仓');
+  }
+}
+async function importXlsx(bytes){
+  try{
+    /* Step 1: 解压 */
+    const map=await unzipToMap(bytes);
+    const sheetKeys=Object.keys(map).filter(k=>/xl\/worksheets\/.*\.xml$/i.test(k)).sort();
+    if(!sheetKeys.length){alert('未找到工作表');return;}
+
+    /* Step 2: 解析共享字符串（如有） */
+    let shared=[];
+    const ssKey=Object.keys(map).find(k=>/xl\/sharedStrings\.xml$/i.test(k));
+    if(ssKey){const ss=new TextDecoder().decode(map[ssKey]);
+      shared=(ss.match(/<si[\s\S]*?<\/si>/g)||[]).map(si=>{const t=si.match(/<t[^>]*>([\s\S]*?)<\/t>/g)||[];return t.map(x=>x.replace(/<[^>]+>/g,'')).join('');}).map(unescapeXml);
+    }
+
+    /* Step 3: 解析所有工作表 */
+    const allSheets=sheetKeys.map(k=>parseSheetRows(new TextDecoder().decode(map[k]),shared));
+
+    /* Step 4: 识别各工作表 */
+    let holdingsSheet=null,tradesSheet=null,feeSheet=null;
+    allSheets.forEach(sheet=>{
+      const hdr=sheet.find(r=>r.some(c=>c==='名称'||c==='交易类型'||c==='费率类型'));
+      if(!hdr)return;
+      if(hdr.includes('名称')&&hdr.includes('份额'))holdingsSheet=sheet;
+      else if(hdr.includes('交易类型'))tradesSheet=sheet;
+      else if(hdr.includes('费率类型'))feeSheet=sheet;
+    });
+    if(!holdingsSheet)holdingsSheet=allSheets[0];
+
+    /* Step 5: 解析持仓明细 */
+    let startIdx=holdingsSheet.findIndex(r=>r.some(c=>c==='名称'));
+    if(startIdx<0)startIdx=0; else startIdx+=1;
+    const out=[];
+    for(let i=startIdx;i<holdingsSheet.length;i++){
+      const c=holdingsSheet[i];
+      const v0=String(c[0]||'').trim();
+      if(!v0||/^合计/.test(v0)||v0==='说明'||/^我的资产/.test(v0)||/^导出时间/.test(v0)||v0==='序号'||v0==='名称')continue;
+      const offset=/^\d+$/.test(v0)?1:0;
+      if(!c[offset]||c[offset+5]===undefined)continue;
+      out.push(rowToHolding(c));
+    }
+
+    /* 解析交易记录并关联到持仓 */
+    if(tradesSheet){
+      let trStart=tradesSheet.findIndex(r=>r.some(c=>c==='交易类型'));
+      if(trStart>=0){
+        trStart+=1;
+        for(let i=trStart;i<tradesSheet.length;i++){
+          const c=tradesSheet[i];
+          if(!c[0]||!c[2])continue;
+          const idx=parseInt(c[0],10)-1;
+          const h=out[idx];
+          if(!h)continue;
+          h.trades.push({date:c[3]||'',shares:num(c[4]),price:num(c[5]),fee:num(c[6]),type:c[2]==='买入'?'buy':'sell'});
+        }
+      }
+    }
+
+    /* 解析费率配置 */
+    if(feeSheet){
+      let fcStart=feeSheet.findIndex(r=>r.some(c=>c==='费率类型'));
+      if(fcStart>=0){
+        fcStart+=1;
+        const newCfg=JSON.parse(JSON.stringify(FEE_CFG_DEFAULT));
+        for(let i=fcStart;i<feeSheet.length;i++){
+          const c=feeSheet[i];
+          if(!c[0]||!c[1])continue;
+          parseFeeConfigRow(newCfg,c[0],c[1],c[2]);
+        }
+        if(newCfg['基金'].redeemRates)newCfg['基金'].redeemRates.sort((a,b)=>a.days-b.days);
+        FEE_CFG=newCfg;saveFeeCfg();
+      }
+    }
+
+    /* 有交易记录的持仓：从交易记录重算份额和成本价 */
+    out.forEach(h=>{
+      if(h.trades.length>0){
+        let runShares=0,runCostBasis=0;
+        h.trades.forEach(tr=>{
+          const s=num(tr.shares),p=num(tr.price),f=num(tr.fee);
+          if(tr.type==='buy'){runShares+=s;runCostBasis+=s*p+f;}
+          else{const curAvg=runShares>0?runCostBasis/runShares:0;runShares-=s;runCostBasis-=s*curAvg;if(runShares<0)runShares=0;if(runCostBasis<0)runCostBasis=0;}
+        });
+        h.shares=runShares;
+        h.cost=runShares>0?runCostBasis/runShares:0;
+      }else{
+        ensureTrades(h);
+      }
+    });
+
+    commitImport(out);
+  }catch(err){alert('xlsx 解析失败：'+(err&&err.message||err)+'\n建议用"下载模板"填写后再导入。');}
+}
+function parseFeeConfigRow(cfg,type,param,val){
+  const v=String(val||'').trim();
+  if(type==='A股'){
+    if(param==='佣金费率')cfg['A股'].commissionRate=num(v);
+    else if(param==='最低佣金(元)')cfg['A股'].commissionMin=num(v);
+    else if(param==='印花税率')cfg['A股'].stampRate=num(v);
+    else if(param==='印花税仅卖出')cfg['A股'].stampSellOnly=(v==='是'||v==='true');
+    else if(param==='过户费率')cfg['A股'].transferRate=num(v);
+  }else if(type==='港股'){
+    if(param==='佣金费率')cfg['港股'].commissionRate=num(v);
+    else if(param==='最低佣金(元)')cfg['港股'].commissionMin=num(v);
+    else if(param==='印花税率')cfg['港股'].stampRate=num(v);
+    else if(param==='交易征费率')cfg['港股'].levyRate=num(v);
+    else if(param==='中央结算费率')cfg['港股'].ccassRate=num(v);
+    else if(param==='交易费率')cfg['港股'].exchangeRate=num(v);
+    else if(param==='结算费率')cfg['港股'].settlementRate=num(v);
+  }else if(type==='基金'){
+    if(param==='申购费率')cfg['基金'].subscribeRate=num(v);
+    else if(/赎回费率/.test(param)){
+      const m2=param.match(/>(\d+)天/);
+      const m1=param.match(/[≤<](\d+)天/);
+      const days=m2?Infinity:(m1?parseInt(m1[1],10):Infinity);
+      const rr=cfg['基金'].redeemRates;
+      const existing=rr.find(r=>r.days===days);
+      if(existing)existing.rate=num(v);
+      else rr.push({days,rate:num(v)});
+    }
+  }else if(type==='债券/理财'){
+    if(param==='固定费率')cfg['债券/理财'].flatRate=num(v);
+  }
+}
+function unescapeXml(s){return String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');}
+function parseSheetRows(xml,shared){
+  const rows=[];
+  const rowMatches=xml.match(/<row[\s\S]*?<\/row>/g)||[];
+  rowMatches.forEach(rowXml=>{
+    const cells=[];
+    const cMatches=rowXml.match(/<c\b[^>]*\/>|<c\b[\s\S]*?<\/c>/g)||[];
+    cMatches.forEach(cXml=>{
+      const refM=cXml.match(/r="([A-Z]+)\d+"/);
+      const col=refM?colToIdx(refM[1]):cells.length;
+      const isShared=/t="s"/.test(cXml);
+      const isInline=/t="(inlineStr|str)"/.test(cXml);
+      let val='';
+      if(isInline){
+        const tM=cXml.match(/<t[^>]*>([\s\S]*?)<\/t>/);
+        val=tM?unescapeXml(tM[1]):'';
+        if(!tM){const vM=cXml.match(/<v>([\s\S]*?)<\/v>/);val=vM?unescapeXml(vM[1]):'';}
+      }else{
+        const vM=cXml.match(/<v>([\s\S]*?)<\/v>/);
+        const raw=vM?vM[1]:'';
+        if(isShared){val=shared[parseInt(raw,10)]||'';}
+        else val=raw;
+      }
+      cells[col]=val;
+    });
+    for(let i=0;i<cells.length;i++)if(cells[i]===undefined)cells[i]='';
+    rows.push(cells);
+  });
+  return rows;
+}
+function colToIdx(letters){let n=0;for(let i=0;i<letters.length;i++)n=n*26+(letters.charCodeAt(i)-64);return n-1;}
+async function unzipToMap(bytes){
+  const dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  const map={};
+  let i=0;
+  while(i+4<=bytes.length){
+    const sig=dv.getUint32(i,true);
+    if(sig!==0x04034b50)break;
+    const method=dv.getUint16(i+8,true);
+    const compSize=dv.getUint32(i+18,true);
+    const nameLen=dv.getUint16(i+26,true);
+    const extraLen=dv.getUint16(i+28,true);
+    const nameStart=i+30;
+    const name=new TextDecoder().decode(bytes.slice(nameStart,nameStart+nameLen));
+    const dataStart=nameStart+nameLen+extraLen;
+    const comp=bytes.slice(dataStart,dataStart+compSize);
+    let content;
+    if(method===0){content=comp;}
+    else if(method===8){content=await inflateRaw(comp);}
+    else{content=comp;}
+    map[name]=content;
+    i=dataStart+compSize;
+  }
+  return map;
+}
+/* ============ 纯 JS inflate 解压器（RFC 1951）兼容所有浏览器 ============ */
+function BitsReader(buf){this.buf=buf;this.pos=0;this.bitBuf=0;this.bitCnt=0;}
+BitsReader.prototype.readBits=function(n){
+  while(this.bitCnt<n){const b=this.buf[this.pos++];if(b===undefined)throw new Error('数据结束');this.bitBuf|=b<<this.bitCnt;this.bitCnt+=8;}
+  const v=this.bitBuf&((1<<n)-1);this.bitBuf>>=n;this.bitCnt-=n;return v;
+};
+BitsReader.prototype.alignByte=function(){this.bitCnt-=this.bitCnt&7;if(this.bitCnt<0)this.bitCnt=0;this.bitBuf&=(1<<this.bitCnt)-1;};
+BitsReader.prototype.readBytes=function(n){this.alignByte();const r=this.buf.slice(this.pos,this.pos+n);this.pos+=n;return r;};
+function buildHuffLens(lengths){
+  const maxBits=lengths.length?Math.max(...lengths.filter(function(l){return l>0;}),0):0;if(maxBits===0)return[];
+  const blCount=new Array(maxBits+1).fill(0);lengths.forEach(function(l){if(l>0)blCount[l]++;});
+  let nextCode=0,codeArr=new Array(maxBits+1).fill(0);for(let b=1;b<=maxBits;b++){nextCode=(nextCode+blCount[b-1])<<1;codeArr[b]=nextCode;}
+  const table=[];lengths.forEach(function(symLen,symIdx){if(symLen>0){table[symIdx]={code:codeArr[symLen]++,len:symLen};}});
+  return table;
+}
+function decodeHuffSym(bits,huffTable){
+  let code=0,len=0;
+  while(true){code=(code<<1)|bits.readBits(1);len++;
+    for(let i=0;i<huffTable.length;i++){var e=huffTable[i];if(e&&e.len===len&&e.code===code)return i;}
+    if(len>15)throw new Error('无效Huffman码');}
+}
+var FIXED_LIT_LENS=(function(){
+  var l=new Array(288);for(let i=0;i<=143;i++)l[i]=8;for(let i=144;i<=255;i++)l[i]=9;
+  for(let i=256;i<=279;i++)l[i]=7;for(let i=280;i<=287;i++)l[i]=8;return buildHuffLens(l);
+})();
+var FIXED_DIST_LENS=(function(){var l=new Array(32).fill(5);return buildHuffLens(l);})();
+var LEN_BASE=[3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258];
+var LEN_EXTRA=[0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0];
+var DIST_BASE=[1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577];
+var DIST_EXTRA=[0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13];
+
+function jsInflate(bits){
+  var out=[];
+  while(true){
+    var bfinal=bits.readBits(1),btype=bits.readBits(2);
+    if(btype===0){bits.alignByte();var len=bits.readBits(16),nlen=bits.readBits(16);var data=bits.readBytes(len);for(var k=0;k<data.length;k++)out.push(data[k]);}
+    else if(btype===1||btype===2){
+      var lt,dt;
+      if(btype===1){lt=FIXED_LIT_LENS;dt=FIXED_DIST_LENS;}
+      else{var HLIT=bits.readBits(4)+4,HDIST=bits.readBits(4)+4,HCLEN=bits.readBits(4)+19;
+        var clenOrd=[16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15],clenArr=new Array(19).fill(0);
+        for(var ci0=0;ci0<HCLEN;ci0++)clenArr[clenOrd[ci0]]=bits.readBits(3);
+        var clt=buildHuffLens(clenArr);
+        var total=HLIT+HDIST,codeLens=[],ci=0;
+        while(ci<total){var s=decodeHuffSym(bits,clt);
+          if(s<=15){codeLens.push(s);ci++;}
+          else if(s===16){var rep=3+bits.readBits(2),prev=codeLens[codeLens.length-1]||0;for(var j=0;j<rep;j++)codeLens.push(prev);ci+=rep;}
+          else if(s===17){rep=3+bits.readBits(3);for(j=0;j<rep;j++)codeLens.push(0);ci+=rep;}
+          else if(s===18){rep=11+bits.readBits(7);for(j=0;j<rep;j++)codeLens.push(0);ci+=rep;}}
+        var ll=codeLens.slice(0,HLIT),dl=codeLens.slice(HLIT);
+        while(ll.length<288)ll.push(0);while(dl.length<32)dl.push(0);
+        lt=buildHuffLens(ll);dt=buildHuffLens(dl);}
+      while(true){
+        var sym2=decodeHuffSym(bits,lt);
+        if(sym2===256)break;
+        if(sym2<256){out.push(sym2);}else{
+          var li=sym2-257,length=LEN_BASE[li]+(LEN_EXTRA[li]?bits.readBits(LEN_EXTRA[li]):0);
+          var di=decodeHuffSym(bits,dt);
+          var distance=DIST_BASE[di]+(DIST_EXTRA[di]?bits.readBits(DIST_EXTRA[di]):0);
+          var start=out.length-distance;for(var m=0;m<length;m++)out.push(start+m>=0?out[start+m]:0);}}
+    }else throw new Error('无效块类型'+btype);
+    if(bfinal)break;
+  }
+  return new Uint8Array(out);
+}
+
+async function inflateRaw(comp){
+  /* Safari/iOS 对 deflate-raw 的 DecompressionStream 会抛出不可捕获的 TDZ 错误
+     因此优先使用纯JS实现（兼容所有浏览器），仅在Chrome/Edge才尝试API */
+  try{return jsInflate(new BitsReader(comp));}
+  catch(e){
+    if(typeof DecompressionStream!=='undefined'){
+      try{
+        var ds=new DecompressionStream('deflate-raw');
+        var stream=new Blob([comp]).stream().pipeThrough(ds);
+        var buf=await new Response(stream).arrayBuffer();
+        return new Uint8Array(buf);
+      }catch(_e){/* JS实现失败且API也不可用 */}
+    }
+    throw new Error('解压失败：'+(e&&e.message||e)+'\n请确认文件是有效的xlsx格式。');
+  }
+}
+
+function parseLine(line){
+  const res=[];let cur='',q=false;
+  for(let i=0;i<line.length;i++){const ch=line[i];
+    if(q){if(ch==='"'){if(line[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=ch;}
+    else{if(ch==='"')q=true;else if(ch===','){res.push(cur);cur='';}else cur+=ch;}}
+  res.push(cur);return res;
+}
+
+/* ============ 下载模板（与导出格式一致）============ */
+function downloadTemplate(){
+  const tmplData=[
+    {id:'ex1',name:'示例-富国全球科技互联网QDII',code:'100055',type:'基金',acct:'招商证券',date:'2026-04-01',shares:7000,cost:4.9,price:5.75,day:0.3,cur:'CNY',fx:1,
+     trades:[{date:'2026-04-01',shares:7000,price:4.9,fee:51.45,type:'buy'}]},
+    {id:'ex2',name:'示例-泡泡玛特',code:'hk09992',type:'股票',acct:'富途',date:'2026-05-01',shares:100,cost:170,price:179,day:-0.11,cur:'HKD',fx:0.92,
+     trades:[{date:'2026-05-01',shares:100,price:170,fee:9.52,type:'buy'}]},
+    {id:'ex3',name:'示例-工银理财天天鑫添益',code:'CZZQ1801',type:'债券/理财',acct:'工商银行',date:'2026-03-20',shares:5000000,cost:1,price:1,day:0.01,cur:'CNY',fx:1,
+     trades:[{date:'2026-03-20',shares:5000000,price:1,fee:0,type:'buy'}]},
+  ];
+  generateXlsx(tmplData,'持仓导入模板.xlsx');
+}
+
+/* ============ 看板：Tab 切换 / 资产总览 / 收益趋势 ============ */
+let ovDim='type';
+let trRange=30;
+
+function switchView(name){
+  document.querySelectorAll('.tabs .tab').forEach(t=>t.classList.toggle('active',t.dataset.view===name));
+  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===name));
+  if(name==='viewOverview')renderOverview();
+  if(name==='viewTrend')renderTrend();
+  if(name==='viewTrades')renderTrades();
+}
+
+/* ----- 交易记录 ----- */
+let trFilter='all'; // all | buy | sell
+function setTrFilter(f){
+  trFilter=f;
+  document.querySelectorAll('#trFilterSeg .chip').forEach((c,i)=>c.classList.toggle('active',['all','buy','sell'][i]===f));
+  renderTrades();
+}
+
+function renderTrades(){
+  // 构建交易流水：遍历所有持仓，展开 trades 数组，并计算每笔交易后的累计数据
+  const selHold=document.getElementById('trHoldFilter').value;
+  const rows=[];
+  data.forEach(h=>{
+    if(selHold!=='all'&&h.id!==selHold)return;
+    ensureTrades(h);
+    const fx=num(h.fx)||1;
+    let runShares=0, runCostBasis=0, totalRealizedCNY=0;
+
+    h.trades.forEach((tr,idx)=>{
+      const isBuy=tr.type==='buy';
+      const trShares=num(tr.shares);
+      const trPrice=num(tr.price);
+      const trFee=num(tr.fee);
+      const trAmt=trShares*trPrice;
+      let avgCostAfter=0, realizedCNY=0;
+
+      if(isBuy){
+        runShares+=trShares;
+        runCostBasis+=trShares*trPrice+trFee; // 手续费纳入成本基础
+        avgCostAfter=runShares>0?runCostBasis/runShares:0;
+      }else{
+        // 减持：当前均价
+        const curAvg=runShares>0?runCostBasis/runShares:0;
+        realizedCNY=(trPrice-curAvg)*trShares*fx - trFee*fx; // 手续费从收益中扣除
+        totalRealizedCNY+=realizedCNY;
+        runShares-=trShares;
+        runCostBasis-=trShares*curAvg;
+        if(runShares<0)runShares=0;
+        if(runCostBasis<0)runCostBasis=0;
+        avgCostAfter=runShares>0?runCostBasis/runShares:0;
+      }
+
+      // 第一笔交易标记为"建仓"
+      const tag=isBuy?(idx===0?'init':'buy'):'sell';
+
+      rows.push({
+        date:tr.date||'',
+        name:h.name,
+        holdingId:h.id,
+        tag,
+        shares:trShares,
+        price:trPrice,
+        fee:trFee,
+        amount:trAmt*fx+trFee*fx,
+        avgCost:avgCostAfter,
+        heldShares:runShares,
+        realizedCNY,
+        fx,
+        _trIdx:idx
+      });
+    });
+  });
+
+  // 筛选
+  let filtered=rows;
+  if(trFilter==='buy')filtered=rows.filter(r=>r.tag!=='sell');
+  if(trFilter==='sell')filtered=rows.filter(r=>r.tag==='sell');
+
+  // 按日期倒序
+  filtered.sort((a,b)=>b.date.localeCompare(a.date)||b._trIdx-a._trIdx);
+
+  const tb=document.getElementById('tradeTbody');
+  const empty=document.getElementById('tradeEmpty');
+  if(!filtered.length){
+    tb.innerHTML='';empty.style.display='block';
+    document.getElementById('tradeTfoot').innerHTML='';
+    return;
+  }
+  empty.style.display='none';
+
+  tb.innerHTML=filtered.map(r=>{
+    const tagHtml=r.tag==='sell'?'<span class="tag-sell">卖出</span>':r.tag==='init'?'<span class="tag-init">建仓</span>':'<span class="tag-buy">买入</span>';
+    const rCcy=num(r.realizedCNY);
+    const realizedHtml=r.tag==='sell'?`<span class="${cls(rCcy)}">${sign(rCcy)}¥${fmt(Math.abs(rCcy),2)}</span>`:'--';
+    const feeHtml=r.fee>0?`<span style="color:var(--gold)">¥${fmt(r.fee,2)}</span>`:'--';
+    return `<tr>
+      <td>${esc(r.date)}</td>
+      <td>${esc(r.name)}</td>
+      <td>${tagHtml}</td>
+      <td style="text-align:right">${fmt(r.shares,r.shares%1?2:0)}</td>
+      <td style="text-align:right">${fmt(r.price,4)}</td>
+      <td style="text-align:right">${feeHtml}</td>
+      <td style="text-align:right">¥${fmt(r.amount,2)}</td>
+      <td style="text-align:right">${fmt(r.avgCost,4)}</td>
+      <td style="text-align:right">${fmt(r.heldShares,r.heldShares%1?2:0)}</td>
+      <td style="text-align:right">${realizedHtml}</td>
+      <td><button class="icon-btn" style="font-size:11px;padding:2px 6px" title="删除此笔记录" onclick="delTrade('${r.holdingId}',${r._trIdx})">×</button></td>
+    </tr>`;
+  }).join('');
+
+  // 合计行
+  const totalBuy=filtered.filter(r=>r.tag!=='sell').reduce((s,r)=>s+r.amount,0);
+  const totalSell=filtered.filter(r=>r.tag==='sell').reduce((s,r)=>s+r.amount,0);
+  const totalFee=filtered.reduce((s,r)=>s+r.fee*r.fx,0);
+  const totalRealized=filtered.filter(r=>r.tag==='sell').reduce((s,r)=>s+r.realizedCNY,0);
+  document.getElementById('tradeTfoot').innerHTML=`<tr class="sum-row">
+    <td colspan="5" style="text-align:right">合计</td>
+    <td style="text-align:right;color:var(--gold)">¥${fmt(totalFee,2)}</td>
+    <td style="text-align:right">买入 ¥${fmt(totalBuy,2)} / 卖出 ¥${fmt(totalSell,2)}</td>
+    <td></td><td></td>
+    <td style="text-align:right" class="${cls(totalRealized)}">${sign(totalRealized)}¥${fmt(Math.abs(totalRealized),2)}</td>
+    <td></td>
+  </tr>`;
+
+  // 更新持仓筛选下拉
+  updateTrHoldFilter();
+}
+
+function updateTrHoldFilter(){
+  const sel=document.getElementById('trHoldFilter');
+  const curVal=sel.value;
+  const opts=['<option value="all">所有持仓</option>'];
+  data.forEach(h=>{opts.push(`<option value="${h.id}">${esc(h.name)}</option>`);});
+  sel.innerHTML=opts.join('');
+  sel.value=curVal;
+}
+
+function delTrade(hid,trIdx){
+  const h=data.find(x=>x.id===hid);
+  if(!h||!h.trades||!h.trades[trIdx])return;
+  const tr=h.trades[trIdx];
+  const feeStr=num(tr.fee)>0?`  手续费: ${tr.fee}`:'';
+  const msg=`确定删除这笔${tr.type==='buy'?'买入':'卖出'}记录？\n日期: ${tr.date}\n份额: ${tr.shares}  价格: ${tr.price}${feeStr}\n\n删除后系统将从剩余交易记录重新计算份额和成本均价。`;
+  if(!confirm(msg))return;
+
+  h.trades.splice(trIdx,1);
+
+  // 从 trades 重新计算份额和成本均价（含手续费）
+  let totalShares=0, totalCostBasis=0;
+  h.trades.forEach(t=>{
+    if(t.type==='buy'){
+      totalShares+=num(t.shares);
+      totalCostBasis+=num(t.shares)*num(t.price)+num(t.fee); // 手续费纳入成本
+    }else{
+      const curAvg=totalShares>0?totalCostBasis/totalShares:0;
+      totalShares-=num(t.shares);
+      totalCostBasis-=num(t.shares)*curAvg;
+      if(totalShares<0)totalShares=0;
+      if(totalCostBasis<0)totalCostBasis=0;
+    }
+  });
+
+  h.shares=totalShares;
+  h.cost=totalShares>0?totalCostBasis/totalShares:0;
+
+  // 更新购买日期为最早买入日
+  const buyDates=h.trades.filter(t=>t.type==='buy').map(t=>t.date).filter(Boolean).sort();
+  h.date=buyDates.length?buyDates[0]:'';
+
+  // 如果没有任何交易记录了，保留当前份额/成本
+  if(!h.trades.length){
+    h.trades=[{date:h.date||todayKey(),shares:num(h.shares),price:num(h.cost),type:'buy',fee:0}];
+  }
+
+  render();
+  renderTrades();
+  toast('已删除交易记录，份额和成本已重新计算');
+}
+
+/* ----- 资产总览 ----- */
+function renderOverview(){
+  if(!document.getElementById('viewOverview').classList.contains('active'))return;
+  const list=data.map(h=>{const c=compute(h);return {h,c};});
+  const total=list.reduce((s,x)=>s+x.c.value,0);
+  const ovParts=list.map((x,i)=>({name:x.h.name,value:x.c.value,color:COLORS[i%COLORS.length]}));
+  drawOvDonut(ovParts,total);
+  document.getElementById('ovDonutCenter').textContent=total>=10000?'¥'+fmt(total/10000,1)+'万':'¥'+fmt(total,2);
+  const dimGetter={type:x=>x.h.type||'其他',acct:x=>x.h.acct||'其他',cur:x=>curShort(x.h.cur)||'CNY'}[ovDim];
+  const groupMap={};
+  list.forEach(x=>{const k=dimGetter(x); if(!groupMap[k])groupMap[k]={value:0,cost:0,pnl:0,day:0};
+    groupMap[k].value+=x.c.value;groupMap[k].cost+=x.c.cost;groupMap[k].pnl+=x.c.pnl;groupMap[k].day+=x.c.dayPnl;});
+  const groups=Object.entries(groupMap).sort((a,b)=>b[1].value-a[1].value);
+  const maxV=groups[0]?groups[0][1].value:1;
+  const groupBox=document.getElementById('ovGroup');
+  groupBox.innerHTML=groups.map(([k,g])=>{
+    const pct=total?g.value/total*100:0;
+    return `<div class="bar"><span class="nm">${esc(k)}</span><span class="track"><span class="fill" style="width:${(g.value/maxV*100).toFixed(1)}%"></span></span><span class="v">¥${fmt(g.value,0)} · ${fmt(pct,1)}%</span></div>`;
+  }).join('') || '<div class="tr-empty">暂无数据</div>';
+  const gainSorted=[...list].sort((a,b)=>b.c.pnl-a.c.pnl).slice(0,5);
+  const lossSorted=[...list].sort((a,b)=>a.c.dayPct-b.c.dayPct).slice(0,5);
+  const maxAbsPnl=Math.max(1,...gainSorted.map(x=>Math.abs(x.c.pnl)));
+  document.getElementById('ovTopGain').innerHTML=gainSorted.map(x=>{
+    const pnl=x.c.pnl, w=Math.min(100,Math.abs(pnl)/maxAbsPnl*100);
+    return `<div class="bar ${pnl>=0?'up':'down'}"><span class="nm">${esc(x.h.name)}</span><span class="track"><span class="fill" style="width:${w.toFixed(1)}%"></span></span><span class="v ${cls(pnl)}">${sign(pnl)}¥${fmt(pnl,0)} · ${sign(x.c.pnlPct)}${fmt(x.c.pnlPct,2)}%</span></div>`;
+  }).join('') || '<div class="tr-empty">暂无数据</div>';
+  const maxAbsDay=Math.max(0.01,...lossSorted.map(x=>Math.abs(x.c.dayPct)));
+  document.getElementById('ovTopLoss').innerHTML=lossSorted.map(x=>{
+    const dp=x.c.dayPct, dpnl=x.c.dayPnl, w=Math.min(100,Math.abs(dp)/maxAbsDay*100);
+    return `<div class="bar ${dp>=0?'up':'down'}"><span class="nm">${esc(x.h.name)}</span><span class="track"><span class="fill" style="width:${w.toFixed(1)}%"></span></span><span class="v ${cls(dp)}">${sign(dpnl)}¥${fmt(dpnl,0)} · ${sign(dp)}${fmt(dp,2)}%</span></div>`;
+  }).join('') || '<div class="tr-empty">暂无数据</div>';
+}
+function setOvDim(d){ovDim=d;
+  document.querySelectorAll('#ovDimSeg .chip').forEach((c,i)=>c.classList.toggle('active',['type','acct','cur'][i]===d));
+  renderOverview();
+}
+function drawOvDonut(parts,total){
+  const svg=document.getElementById('ovDonut');const lg=document.getElementById('ovLegend');
+  svg.innerHTML='';lg.innerHTML='';
+  if(!total){svg.innerHTML=`<circle cx="21" cy="21" r="15.9155" fill="none" stroke="#1e2a40" stroke-width="5.5"/>`;lg.innerHTML='<div class="li">暂无数据</div>';return;}
+  let off=25;const r=15.9155,circ=100;
+  const sorted=[...parts].sort((a,b)=>b.value-a.value);
+  sorted.forEach(p=>{
+    const pc=p.value/total*100;
+    const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx','21');c.setAttribute('cy','21');c.setAttribute('r',r);
+    c.setAttribute('fill','none');c.setAttribute('stroke',p.color);c.setAttribute('stroke-width','5.5');
+    c.setAttribute('stroke-dasharray',`${pc} ${circ-pc}`);c.setAttribute('stroke-dashoffset',off);
+    svg.appendChild(c);off-=pc;
+    const it=document.createElement('div');it.className='li';
+    it.innerHTML=`<span class="sw" style="background:${p.color}"></span><span class="nm">${esc(p.name)}</span><span class="v">¥${fmt(p.value,0)}</span><span class="pc">${fmt(pc,1)}%</span>`;
+    lg.appendChild(it);
+  });
+}
+
+/* ----- 收益趋势：快照 + 交易感知的插值 ----- */
+function loadSnapshots(){try{const r=localStorage.getItem(SNAP_KEY);if(r)return JSON.parse(r);}catch(e){}return [];}
+function saveSnapshots(arr){localStorage.setItem(SNAP_KEY,JSON.stringify(arr));}
+function todayKey(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function dayKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+
+function ensureDailySnapshot(){
+  const arr=loadSnapshots();
+  const tk=todayKey();
+  if(!data.length)return arr;
+  const total=data.reduce((s,h)=>s+compute(h).value,0);
+  const cost=data.reduce((s,h)=>s+compute(h).cost,0);
+  const last=arr[arr.length-1];
+  if(last&&last.date===tk){last.value=total;last.cost=cost;}
+  else arr.push({date:tk,value:total,cost});
+  saveSnapshots(arr);return arr;
+}
+function snapshotNow(){ensureDailySnapshot();renderTrend();toast('已记录当前快照');}
+function clearSnapshots(){if(confirm('清空所有历史快照？此操作不可恢复（不影响持仓数据）。')){saveSnapshots([]);renderTrend();}}
+function setTrRange(d){trRange=d;
+  document.querySelectorAll('#trRangeSeg .chip').forEach((c,i)=>c.classList.toggle('active',[7,30,90,365,0][i]===d));
+  renderTrend();
+}
+
+// 核心：根据持仓+交易历史+快照，反推每日市值/成本曲线
+function buildTrendSeries(){
+  if(!data.length)return [];
+  const today=new Date(); today.setHours(0,0,0,0);
+
+  // 加载快照（真实数据点）
+  const snapArr=loadSnapshots();
+  const snapMap={};
+  snapArr.forEach(s=>{snapMap[s.date]={value:s.value,cost:s.cost};});
+
+  // 找最早日期：考虑交易记录
+  let earliest=null;
+  data.forEach(h=>{
+    ensureTrades(h);
+    h.trades.forEach(t=>{
+      if(t.date){
+        const d=new Date(t.date+'T00:00:00');
+        if(!isNaN(d)&&(!earliest||d<earliest))earliest=d;
+      }
+    });
+    if(h.date){const d=new Date(h.date+'T00:00:00');if(!isNaN(d)&&(!earliest||d<earliest))earliest=d;}
+  });
+  if(!earliest) earliest=new Date(today.getTime()-30*86400000);
+  const minDate=new Date(today.getTime()-5*365*86400000);
+  if(earliest<minDate) earliest=minDate;
+
+  const series=[];
+  const dayMs=86400000;
+
+  for(let t=earliest.getTime();t<=today.getTime();t+=dayMs){
+    const d=new Date(t);
+    const k=dayKey(d);
+
+    // 如果有真实快照，优先使用
+    if(snapMap[k]){
+      series.push({date:k,value:snapMap[k].value,cost:snapMap[k].cost,actual:true});
+      continue;
+    }
+
+    // 否则基于交易记录插值
+    let value=0, cost=0;
+    data.forEach(h=>{
+      ensureTrades(h);
+      const fx=num(h.fx)||1;
+      const curPx=num(h.price);
+
+      // 计算当日持有份额和累计成本（含手续费）
+      let dayShares=0, dayCostBasis=0;
+      h.trades.forEach(tr=>{
+        const td=tr.date?new Date(tr.date+'T00:00:00'):null;
+        if(td&&isNaN(td))return;
+        const tradeTime=td?td.getTime():0;
+        if(tradeTime>t)return; // 交易还没发生
+        if(tr.type==='buy'){
+          dayShares+=num(tr.shares);
+          dayCostBasis+=num(tr.shares)*num(tr.price)+num(tr.fee); // 手续费纳入成本
+        }else if(tr.type==='sell'){
+          // 减持：按当前均价减少成本基础（不是按卖出价）
+          const curAvg=dayShares>0?dayCostBasis/dayShares:0;
+          dayShares-=num(tr.shares);
+          dayCostBasis-=num(tr.shares)*curAvg;
+          if(dayShares<0)dayShares=0;
+          if(dayCostBasis<0)dayCostBasis=0;
+        }
+      });
+      if(dayShares<=0)return; // 当日未持有
+
+      const avgCostPx=dayCostBasis/dayShares;
+      cost+=dayCostBasis*fx;
+
+      // 插值估算当日价格：找该持仓的最早买入日
+      let firstBuyDate=null;
+      h.trades.forEach(tr=>{
+        if(tr.type==='buy'&&tr.date){
+          const bd=new Date(tr.date+'T00:00:00');
+          if(!isNaN(bd)&&(!firstBuyDate||bd<firstBuyDate))firstBuyDate=bd;
+        }
+      });
+
+      let px=avgCostPx;
+      if(firstBuyDate&&curPx){
+        const span=today.getTime()-firstBuyDate.getTime();
+        if(span<=0)px=curPx;
+        else{
+          const ratio=(t-firstBuyDate.getTime())/span;
+          px=avgCostPx+(curPx-avgCostPx)*Math.max(0,Math.min(1,ratio));
+        }
+      }else if(curPx){
+        px=curPx;
+      }
+      value+=dayShares*px*fx;
+    });
+    series.push({date:k,value,cost,actual:false});
+  }
+  return series;
+}
+
+function renderTrend(){
+  if(!document.getElementById('viewTrend').classList.contains('active'))return;
+  let arr=buildTrendSeries();
+  if(trRange>0){const cutoff=Date.now()-trRange*86400000;arr=arr.filter(x=>new Date(x.date+'T00:00:00').getTime()>=cutoff);}
+  const empty=document.getElementById('trEmpty');
+  const svg=document.getElementById('trChart');
+  const stats=document.getElementById('trStats');
+  if(arr.length<2){empty.style.display='block';svg.style.display='none';stats.innerHTML='';return;}
+  empty.style.display='none';svg.style.display='block';
+  const W=800,H=280,PAD={l:64,r:20,t:20,b:30};
+  const ys=arr.map(x=>x.value), cs=arr.map(x=>x.cost);
+  const minY=Math.min(...ys,...cs), maxY=Math.max(...ys,...cs);
+  const padY=(maxY-minY)*0.1||maxY*0.05||1;
+  const yLo=Math.max(0,minY-padY), yHi=maxY+padY;
+  const sx=i=>PAD.l+(W-PAD.l-PAD.r)*(arr.length<=1?0.5:i/(arr.length-1));
+  const sy=v=>PAD.t+(H-PAD.t-PAD.b)*(1-(v-yLo)/(yHi-yLo||1));
+  let grid='';
+  for(let g=0;g<=4;g++){const y=PAD.t+(H-PAD.t-PAD.b)*g/4;const v=yHi-(yHi-yLo)*g/4;
+    grid+=`<line x1="${PAD.l}" y1="${y}" x2="${W-PAD.r}" y2="${y}" stroke="#1e2a40" stroke-width="1"/><text x="${PAD.l-6}" y="${y+4}" fill="#8497b8" font-size="10" text-anchor="end">${v>=10000?fmt(v/10000,1)+'万':fmt(v,0)}</text>`;}
+  const valPath=ys.map((v,i)=>(i===0?'M':'L')+sx(i)+','+sy(v)).join(' ');
+  const valArea=valPath+` L${sx(arr.length-1)},${H-PAD.b} L${sx(0)},${H-PAD.b} Z`;
+  const costPath=cs.map((v,i)=>(i===0?'M':'L')+sx(i)+','+sy(v)).join(' ');
+  const step=Math.max(1,Math.floor(arr.length/6));
+  let xlabels='';
+  for(let i=0;i<arr.length;i+=step){xlabels+=`<text x="${sx(i)}" y="${H-PAD.b+18}" fill="#8497b8" font-size="10" text-anchor="middle">${arr[i].date.slice(5)}</text>`;}
+
+  // 标记真实快照点
+  let snapDots='';
+  arr.forEach((p,i)=>{
+    if(p.actual){
+      snapDots+=`<circle cx="${sx(i)}" cy="${sy(p.value)}" r="3" fill="${lastUp?'#ff5d5d':'#23c08a'}" opacity="0.7"/>`;
+    }
+  });
+
+  const lastV=ys[ys.length-1],firstV=ys[0],delta=lastV-firstV,deltaPct=firstV?delta/firstV*100:0;
+  const lastUp=delta>=0;
+  const colorMain=lastUp?'#ff5d5d':'#23c08a';
+  const legend=`<g font-size="11"><rect x="${W-PAD.r-200}" y="${PAD.t}" width="190" height="52" fill="rgba(15,22,36,.7)" rx="6"/><line x1="${W-PAD.r-190}" y1="${PAD.t+13}" x2="${W-PAD.r-170}" y2="${PAD.t+13}" stroke="${colorMain}" stroke-width="2"/><text x="${W-PAD.r-165}" y="${PAD.t+16}" fill="#dfe7f5">总市值（快照+插值）</text><line x1="${W-PAD.r-190}" y1="${PAD.t+30}" x2="${W-PAD.r-170}" y2="${PAD.t+30}" stroke="#8497b8" stroke-width="1.5" stroke-dasharray="4 3"/><text x="${W-PAD.r-165}" y="${PAD.t+33}" fill="#dfe7f5">累计成本</text><circle cx="${W-PAD.r-180}" cy="${PAD.t+47}" r="3" fill="${colorMain}" opacity="0.7"/><text x="${W-PAD.r-165}" y="${PAD.t+50}" fill="#dfe7f5">真实快照</text></g>`;
+  svg.innerHTML=`<defs><linearGradient id="trFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${colorMain}" stop-opacity="0.32"/><stop offset="100%" stop-color="${colorMain}" stop-opacity="0"/></linearGradient></defs>${grid}<path d="${valArea}" fill="url(#trFill)"/><path d="${costPath}" fill="none" stroke="#8497b8" stroke-width="1.5" stroke-dasharray="4 3"/><path d="${valPath}" fill="none" stroke="${colorMain}" stroke-width="2"/>${snapDots}<circle cx="${sx(arr.length-1)}" cy="${sy(lastV)}" r="4" fill="${colorMain}"/>${xlabels}${legend}`;
+  const peakV=Math.max(...ys),troughV=Math.min(...ys);
+  let maxDD=0,peak=ys[0];
+  ys.forEach(v=>{if(v>peak)peak=v;const dd=peak?(v-peak)/peak*100:0;if(dd<maxDD)maxDD=dd;});
+  const lastCost=cs[cs.length-1]||0;
+  const totalPnl=lastV-lastCost;
+  const totalRealized=data.reduce((s,h)=>s+calcRealizedPnl(h),0);
+  const allPnl=totalPnl+totalRealized;
+  stats.innerHTML=`
+    <div class="tr-stat"><div class="lbl">最新市值</div><div class="val ${cls(delta)}">¥${fmt(lastV,0)}<br><span style="font-size:11px">${sign(delta)}¥${fmt(delta,0)} · ${sign(deltaPct)}${fmt(deltaPct,2)}%</span></div></div>
+    <div class="tr-stat"><div class="lbl">累计成本</div><div class="val">¥${fmt(lastCost,0)}<br><span style="font-size:11px;color:var(--txt-dim)">已建仓部分合计</span></div></div>
+    <div class="tr-stat"><div class="lbl">累计收益</div><div class="val ${cls(allPnl)}">${sign(allPnl)}¥${fmt(allPnl,0)}<br><span style="font-size:11px">浮盈${sign(totalPnl)}¥${fmt(totalPnl,0)} + 已实现${sign(totalRealized)}¥${fmt(totalRealized,0)}</span></div></div>
+    <div class="tr-stat"><div class="lbl">最大回撤</div><div class="val down">${fmt(maxDD,2)}%<br><span style="font-size:11px;color:var(--txt-dim)">区间高点回撤</span></div></div>`;
+}
+
+render();
+fetchFxRates();
+ensureDailySnapshot();
+setTimeout(()=>refreshQuotes(false),600);
+</script>
+</body>
+</html>
