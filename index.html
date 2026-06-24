@@ -125,6 +125,11 @@
   .icon-btn.btn-sell{color:var(--down);border-color:rgba(35,192,138,.3)}
   .icon-btn.btn-sell:hover{border-color:var(--down);background:rgba(35,192,138,.1)}
   .empty{text-align:center;color:var(--txt-dim);padding:40px 0;font-size:13px}
+  .empty-hero{text-align:center;padding:60px 20px}
+  .empty-hero h2{font-size:22px;color:var(--txt);margin:0 0 8px;font-weight:600}
+  .empty-hero p{font-size:14px;color:var(--txt-dim);margin:0 0 28px;line-height:1.6}
+  .empty-hero .empty-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .empty-hero .empty-actions .btn{padding:10px 24px;font-size:14px}
   tfoot td{border-top:2px solid var(--line-2);border-bottom:none;font-weight:700;color:var(--txt);padding-top:13px}
 
   /* modal */
@@ -309,7 +314,15 @@
         <tfoot id="tfoot"></tfoot>
       </table>
     </div>
-    <div class="empty" id="emptyTip" style="display:none">还没有持仓，点右上角「添加持仓」开始记录吧</div>
+    <div class="empty-hero" id="emptyTip" style="display:none">
+      <h2>📊 欢迎使用持仓看板</h2>
+      <p>这是你专属的投资看板，数据仅保存在你的浏览器中，安全私密。<br>开始记录你的第一笔持仓吧：</p>
+      <div class="empty-actions">
+        <button class="btn primary" onclick="openAdd()">＋ 添加持仓</button>
+        <button class="btn ghost" onclick="downloadTemplate()">下载模板</button>
+        <button class="btn ghost" onclick="document.getElementById('fileInput').click()">导入数据</button>
+      </div>
+    </div>
   </div>
   </div>
 
@@ -736,28 +749,8 @@ function load(){
   // 仅更新版本号，不清除用户已保存的数据
   localStorage.setItem(DATA_VER,String(CUR_VER));
   try{const r=localStorage.getItem(KEY);if(r)return JSON.parse(r);}catch(e){}
-  return [
-    {id:id(),name:'恒生科技ETF华夏',code:'sh513180',type:'股票',acct:'招商证券',date:'2026-04-02',shares:7500,cost:0.5413,price:0.582,day:0.34,cur:'CNY',fx:1,
-     trades:[{date:'2026-04-02',shares:7500,price:0.5413,type:'buy'}]},
-    {id:id(),name:'大北农',code:'sz002385',type:'股票',acct:'招商证券',date:'2025-08-28',shares:4700,cost:4.1143,price:2.87,day:-0.69,cur:'CNY',fx:1,
-     trades:[{date:'2025-08-28',shares:4700,price:4.1143,type:'buy'}]},
-    {id:id(),name:'易方达先锋成长混合A(6月1日)',code:'011891',type:'基金',acct:'招商证券',date:'2026-06-01',shares:12704.24,cost:3.9298,price:5.1797,day:4.78,cur:'CNY',fx:1,
-     trades:[{date:'2026-06-01',shares:12704.24,price:3.9298,type:'buy'}]},
-    {id:id(),name:'易方达先锋成长混合A(6月8日)',code:'011891',type:'基金',acct:'招商证券',date:'2026-06-08',shares:4168.4,cost:4.2279,price:5.1782,day:4.75,cur:'CNY',fx:1,
-     trades:[{date:'2026-06-08',shares:4168.4,price:4.2279,type:'buy'}]},
-    {id:id(),name:'广发全球精选',code:'HK0000914660',type:'基金',acct:'富途',date:'2026-06-01',shares:277.0309,cost:2.887764,price:2.893137,day:0,cur:'USD',fx:7.18,
-     trades:[{date:'2026-06-01',shares:277.0309,price:2.887764,type:'buy'}]},
-    {id:id(),name:'泡泡玛特',code:'hk09992',type:'股票',acct:'富途',date:'2026-05-13',shares:9,cost:159,price:160.2,day:-2.50,cur:'HKD',fx:0.92,
-     trades:[{date:'2026-05-13',shares:9,price:159,type:'buy'}]},
-    {id:id(),name:'工银理财·天天鑫添益(6月2日)',code:'CZZQ1801',type:'债券/理财',acct:'工商银行',date:'2026-06-02',shares:3968883.95,cost:1.2598,price:1.2586,day:0,cur:'CNY',fx:1,
-     trades:[{date:'2026-06-02',shares:3968883.95,price:1.2598,type:'buy'}]},
-    {id:id(),name:'融通产业趋势',code:'008382',type:'基金',acct:'工商银行',date:'2026-06-02',shares:42171.98,cost:2.3362,price:2.9636,day:4.17,cur:'CNY',fx:1,
-     trades:[{date:'2026-06-02',shares:42171.98,price:2.3362,type:'buy'}]},
-    {id:id(),name:'富国全球科技互联网（QDII）',code:'100055',type:'基金',acct:'工商银行',date:'2026-06-02',shares:68788,cost:5.937,price:6.4035,day:0.08,cur:'CNY',fx:1,
-     trades:[{date:'2026-06-02',shares:68788,price:5.937,type:'buy'}]},
-    {id:id(),name:'工银理财·天天鑫添益(5月13日)',code:'CZZQ1801',type:'债券/理财',acct:'工商银行',date:'2026-05-13',shares:397.46,cost:1.258,price:1.2586,day:0,cur:'CNY',fx:1,
-     trades:[{date:'2026-05-13',shares:397.46,price:1.258,type:'buy'}]}
-  ];
+  // 新用户返回空数组，不预填任何数据
+  return [];
 }
 function save(){localStorage.setItem(KEY,JSON.stringify(data));}
 function loadAccts(){try{const r=localStorage.getItem(ACCT_KEY);if(r)return JSON.parse(r);}catch(e){}return [];}
