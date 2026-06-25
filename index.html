@@ -2546,17 +2546,27 @@ function seedHistoricalSnapshots(){
   var today2=new Date();today2.setHours(0,0,0,0);
   var existingDates={};
   for(var _ei=0;_ei<snapArr.length;_ei++)existingDates[snapArr[_ei].date]=true;
+  // 计算无日期持仓的常量偏移
+  var _undatedVal=0,_undatedCost=0;
+  for(var _udi=0;_udi<data.length;_udi++){
+    var _uh=data[_udi];
+    var _uD=!!(_uh.date);
+    if(!_uD){for(var _utj=0;_utj<_uh.trades.length;_utj++){if(_uh.trades[_utj].date&&_uh.trades[_utj].type==='buy'){_uD=true;break;}}}
+    if(!_uD){ensureTrades(_uh);var _uc=compute(_uh);_undatedVal+=_uc.value;_undatedCost+=_uc.cost;}
+  }
   for(var _si2=0;_si2<sKeys.length;_si2++){
     var sd=sKeys[_si2];
     if(existingDates[sd])continue;
     var d=new Date(sd+'T00:00:00');
     if(d>=today2)continue;
-    var value=0,cost=0;
+    var value=_undatedVal,cost=_undatedCost;
     for(var _hi2=0;_hi2<data.length;_hi2++){
       var h2=data[_hi2];ensureTrades(h2);
+      // 检查是否有日期信息
+      var _hD=!!h2.date;if(!_hD){for(var _tc=0;_tc<h2.trades.length;_tc++){if(h2.trades[_tc].date){_hD=true;break;}}}
+      if(!_hD)continue; // 无日期的已作为常量
       var fx=num(h2.fx)||1;
       var dayShares=0,dayCostBasis=0;
-      var hasValidBuyDate=!!h2.date;
       for(var _ti2=0;_ti2<h2.trades.length;_ti2++){
         var tr2=h2.trades[_ti2];
         var td=tr2.date?new Date(tr2.date+'T00:00:00'):null;
@@ -2570,13 +2580,9 @@ function seedHistoricalSnapshots(){
           if(dayShares<0)dayShares=0;if(dayCostBasis<0)dayCostBasis=0;
         }
       }
-      if(!hasValidBuyDate && dayShares<=0){
-        dayShares=num(h2.shares);
-        dayCostBasis=num(h2.shares)*num(h2.cost);
-      }
       if(dayShares<=0)continue;
       cost+=dayCostBasis*fx;
-      value+=dayShares*num(h2.cost)*fx;
+      value+=dayShares*num(h2.cost)*fx; // 种子快照按成本价估值
     }
     snapArr.push({date:sd,value:value,cost:cost});
   }
@@ -2597,59 +2603,76 @@ function buildTrendSeries(){
   if(!data.length)return [];
   var today=new Date(); today.setHours(0,0,0,0);
 
-  // 加载快照（真实数据点）
   var snapArr=loadSnapshots();
   var snapMap={};
   for(var _si=0;_si<snapArr.length;_si++){var s=snapArr[_si];snapMap[s.date]={value:s.value,cost:s.cost};}
 
-  // 找最早日期：考虑交易记录和持仓日期
+  // ===== 第一步：分类持仓（有日期信息 vs 无日期信息） =====
   var earliest=null;
+  var hasAnyDated=false;
   for(var _hi=0;_hi<data.length;_hi++){
     var h=data[_hi];
     ensureTrades(h);
+    var holdingHasDate=false;
     if(h.date){
-      var d=new Date(h.date+'T00:00:00');
-      if(!isNaN(d)&&(!earliest||d<earliest))earliest=d;
+      var hd=new Date(h.date+'T00:00:00');
+      if(!isNaN(hd)&&hd<today){holdingHasDate=true;hasAnyDated=true;
+        if(!earliest||hd<earliest)earliest=hd;}
     }
     for(var _ti=0;_ti<h.trades.length;_ti++){
-      var t=h.trades[_ti];
-      if(t.date){
-        var td=new Date(t.date+'T00:00:00');
-        if(!isNaN(td)&&td<today&&(!earliest||td<earliest))earliest=td;
+      var ht=h.trades[_ti];
+      if(ht.date){
+        var htd=new Date(ht.date+'T00:00:00');
+      if(!isNaN(htd)&&htd<today){holdingHasDate=true;hasAnyDated=true;
+        if(!earliest||htd<earliest)earliest=htd;}
       }
     }
+    h._hasDateInfo=holdingHasDate;
   }
-  // 如果没有有效的历史日期，回溯90天
+
+  // ===== 第二步：没有任何日期信息时 → 生成短期平直基线 =====
   if(!earliest||(today.getTime()-earliest.getTime())<7*86400000){
-    earliest=new Date(today.getTime()-90*86400000);
+    var baseVal=0,baseCost=0;
+    for(var _bi=0;_bi<data.length;_bi++){var bh=data[_bi];ensureTrades(bh);var bc=compute(bh);baseVal+=bc.value;baseCost+=bc.cost;}
+    var blines=[];
+    var bStart=new Date(today.getTime()-14*86400000);
+    for(var bt=bStart.getTime();bt<=today.getTime();bt+=86400000){
+      var bdt=new Date(bt);var bk=dayKey(bdt);
+      var isTodaySnap=!!snapMap[bk];
+      blines.push({date:bk,value:isTodaySnap?snapMap[bk].value:baseVal,cost:isTodaySnap?snapMap[bk].cost:baseCost,actual:isTodaySnap});
+    }
+    return blines;
   }
+
+  // ===== 第三步：正常情况 —— 有历史日期 =====
   var minDate=new Date(today.getTime()-5*365*86400000);
-  if(earliest<minDate) earliest=minDate;
+  if(earliest<minDate)earliest=minDate;
+
+  // 计算无日期持仓的当前市值/成本（作为常数偏移量）
+  var undatedVal=0,undatedCost=0;
+  for(var _ui=0;_ui<data.length;_ui++){
+    var uh=data[_ui];
+    if(!uh._hasDateInfo){ensureTrades(uh);var uc=compute(uh);undatedVal+=uc.value;undatedCost+=uc.cost;}
+  }
 
   var series=[];
-  var dayMs=86400000;
-
-  for(var t=earliest.getTime();t<=today.getTime();t+=dayMs){
+  for(var t=earliest.getTime();t<=today.getTime();t+=86400000){
     var d=new Date(t);
     var k=dayKey(d);
 
-    // 如果有真实快照，优先使用
-    if(snapMap[k]){
-      series.push({date:k,value:snapMap[k].value,cost:snapMap[k].cost,actual:true});
-      continue;
-    }
+    if(snapMap[k]){series.push({date:k,value:snapMap[k].value,cost:snapMap[k].cost,actual:true});continue;}
 
-    // 否则基于交易记录插值
-    var value=0, cost=0;
+    var value=undatedVal, cost=undatedCost;
+
     for(var _hi2=0;_hi2<data.length;_hi2++){
       var h2=data[_hi2];
+      if(!h2._hasDateInfo)continue; // 无日期的已作为常量处理
+
       ensureTrades(h2);
       var fx=num(h2.fx)||1;
       var curPx=num(h2.price);
 
-      var dayShares=0, dayCostBasis=0;
-      var hasValidBuyDate=!!h2.date;
-
+      var dayShares=0,dayCostBasis=0;
       for(var _ti2=0;_ti2<h2.trades.length;_ti2++){
         var tr=h2.trades[_ti2];
         var trd=tr.date?new Date(tr.date+'T00:00:00'):null;
@@ -2667,17 +2690,12 @@ function buildTrendSeries(){
           if(dayCostBasis<0)dayCostBasis=0;
         }
       }
-      // 没有有效买入日期时，视为从earliest就持有当前份额
-      if(!hasValidBuyDate && dayShares<=0){
-        dayShares=num(h2.shares);
-        dayCostBasis=num(h2.shares)*num(h2.cost);
-      }
-      if(dayShares<=0) continue;
+      if(dayShares<=0)continue;
 
       var avgCostPx=dayCostBasis/dayShares;
       cost+=dayCostBasis*fx;
 
-      // 插值估算当日价格
+      // 价格插值
       var firstBuyDate=null;
       for(var _ti3=0;_ti3<h2.trades.length;_ti3++){
         var tr3=h2.trades[_ti3];
@@ -2686,15 +2704,11 @@ function buildTrendSeries(){
           if(!isNaN(bd)&&(!firstBuyDate||bd<firstBuyDate))firstBuyDate=bd;
         }
       }
-
       var px=avgCostPx;
       if(firstBuyDate&&curPx){
         var span=today.getTime()-firstBuyDate.getTime();
         if(span<=0)px=curPx;
-        else{
-          var ratio=(t-firstBuyDate.getTime())/span;
-          px=avgCostPx+(curPx-avgCostPx)*Math.max(0,Math.min(1,ratio));
-        }
+        else{var ratio=(t-firstBuyDate.getTime())/span;px=avgCostPx+(curPx-avgCostPx)*Math.max(0,Math.min(1,ratio));}
       }else if(curPx){
         px=curPx;
       }
@@ -2702,7 +2716,6 @@ function buildTrendSeries(){
     }
     series.push({date:k,value:value,cost:cost,actual:false});
   }
-  console.log('[buildTrendSeries] generated '+series.length+' points, earliest='+dayKey(earliest));
   return series;
 }
 
