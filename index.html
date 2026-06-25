@@ -1902,9 +1902,8 @@ function importCsvText(raw){
   }catch(err){alert('导入失败，请确认是本工具导出的CSV或模板格式');}
 }
 function rowToHolding(c){
-  /* 兼容新旧格式：新格式第1列为序号(数字)，旧格式第1列为名称 */
-  const offset=(c[0]&&/^\d+$/.test(String(c[0]).trim()))?1:0;
-  const h={id:id(),name:c[offset]||'',code:c[offset+1]||'',type:c[offset+2]||'基金',acct:c[offset+3]||'其他',date:c[offset+4]||'',
+  var offset=(c[0]&&/^\d+$/.test(String(c[0]).trim()))?1:0;
+  var h={id:id(),name:c[offset]||'',code:c[offset+1]||'',type:c[offset+2]||'基金',acct:c[offset+3]||'其他',date:c[offset+4]||'',
     shares:num(c[offset+5]),cost:num(c[offset+6]),price:num(c[offset+7]),day:num(c[offset+8]),
     cur:(c[offset+9]||'CNY').replace(/\s.*$/,''),fx:num(c[offset+10])||1,trades:[]};
   return h;
@@ -1921,99 +1920,121 @@ function commitImport(out){
     toast('已导入 '+out.length+' 条持仓');
   }
 }
-async function importXlsx(bytes){
+function importXlsx(bytes){
   try{
     /* Step 1: 解压 */
     var map=unzipToMap(bytes);
-    const sheetKeys=Object.keys(map).filter(k=>/xl\/worksheets\/.*\.xml$/i.test(k)).sort();
+    var sheetKeys=[];
+    var _allKeys=Object.keys(map);
+    for(var _ki=0;_ki<_allKeys.length;_ki++){if(/xl\/worksheets\/.*\.xml$/i.test(_allKeys[_ki]))sheetKeys.push(_allKeys[_ki]);}
+    sheetKeys.sort();
     if(!sheetKeys.length){alert('未找到工作表');return;}
 
     /* Step 2: 解析共享字符串（如有） */
-    let shared=[];
-    const ssKey=Object.keys(map).find(k=>/xl\/sharedStrings\.xml$/i.test(k));
-    if(ssKey){const ss=new TextDecoder().decode(map[ssKey]);
-      shared=(ss.match(/<si[\s\S]*?<\/si>/g)||[]).map(si=>{const t=si.match(/<t[^>]*>([\s\S]*?)<\/t>/g)||[];return t.map(x=>x.replace(/<[^>]+>/g,'')).join('');}).map(unescapeXml);
+    var shared=[];
+    var ssKey=null;
+    var _allKeys2=Object.keys(map);
+    for(var _ki2=0;_ki2<_allKeys2.length;_ki2++){if(/xl\/sharedStrings\.xml$/i.test(_allKeys2[_ki2])){ssKey=_allKeys2[_ki2];break;}}
+    if(ssKey){var ss=new TextDecoder().decode(map[ssKey]);
+      var _siArr=ss.match(/<si[\s\S]*?<\/si>/g)||[];
+      shared=[];
+      for(var _si=0;_si<_siArr.length;_si++){
+        var si=_siArr[_si];
+        var t=si.match(/<t[^>]*>([\s\S]*?)<\/t>/g)||[];
+        var _parts=[];
+        for(var _ti=0;_ti<t.length;_ti++)_parts.push(t[_ti].replace(/<[^>]+>/g,''));
+        shared.push(unescapeXml(_parts.join('')));
+      }
     }
 
     /* Step 3: 解析所有工作表 */
-    const allSheets=sheetKeys.map(k=>parseSheetRows(new TextDecoder().decode(map[k]),shared));
+    var allSheets=[];
+    for(var _sk=0;_sk<sheetKeys.length;_sk++)allSheets.push(parseSheetRows(new TextDecoder().decode(map[sheetKeys[_sk]]),shared));
 
     /* Step 4: 识别各工作表 */
-    let holdingsSheet=null,tradesSheet=null,feeSheet=null;
-    allSheets.forEach(sheet=>{
-      const hdr=sheet.find(r=>r.some(c=>c==='名称'||c==='交易类型'||c==='费率类型'));
-      if(!hdr)return;
-      if(hdr.includes('名称')&&hdr.includes('份额'))holdingsSheet=sheet;
-      else if(hdr.includes('交易类型'))tradesSheet=sheet;
-      else if(hdr.includes('费率类型'))feeSheet=sheet;
-    });
+    var holdingsSheet=null,tradesSheet=null,feeSheet=null;
+    for(var _sidx=0;_sidx<allSheets.length;_sidx++){
+      var sheet=allSheets[_sidx];
+      var hdr=null;
+      for(var _ri=0;_ri<sheet.length;_ri++){if(sheet[_ri].some(function(c){return c==='名称'||c==='交易类型'||c==='费率类型';})){hdr=sheet[_ri];break;}}
+      if(!hdr)continue;
+      if(hdr.indexOf('名称')>=0&&hdr.indexOf('份额')>=0)holdingsSheet=sheet;
+      else if(hdr.indexOf('交易类型')>=0)tradesSheet=sheet;
+      else if(hdr.indexOf('费率类型')>=0)feeSheet=sheet;
+    }
     if(!holdingsSheet)holdingsSheet=allSheets[0];
 
     /* Step 5: 解析持仓明细 */
-    let startIdx=holdingsSheet.findIndex(r=>r.some(c=>c==='名称'));
+    var startIdx=-1;
+    for(var _hi=0;_hi<holdingsSheet.length;_hi++){if(holdingsSheet[_hi].some(function(c){return c==='名称';})){startIdx=_hi;break;}}
     if(startIdx<0)startIdx=0; else startIdx+=1;
-    const out=[];
-    for(let i=startIdx;i<holdingsSheet.length;i++){
-      const c=holdingsSheet[i];
-      const v0=String(c[0]||'').trim();
+    var out=[];
+    for(var i=startIdx;i<holdingsSheet.length;i++){
+      var c=holdingsSheet[i];
+      var v0=String(c[0]||'').trim();
       if(!v0||/^合计/.test(v0)||v0==='说明'||/^我的资产/.test(v0)||/^导出时间/.test(v0)||v0==='序号'||v0==='名称')continue;
-      const offset=/^\d+$/.test(v0)?1:0;
+      var offset=/^\d+$/.test(v0)?1:0;
       if(!c[offset]||c[offset+5]===undefined)continue;
       out.push(rowToHolding(c));
     }
 
     /* 解析交易记录并关联到持仓 */
     if(tradesSheet){
-      let trStart=tradesSheet.findIndex(r=>r.some(c=>c==='交易类型'));
+      var trStart=-1;
+      for(var _tri=0;_tri<tradesSheet.length;_tri++){if(tradesSheet[_tri].some(function(c){return c==='交易类型';})){trStart=_tri;break;}}
       if(trStart>=0){
         trStart+=1;
-        for(let i=trStart;i<tradesSheet.length;i++){
-          const c=tradesSheet[i];
-          if(!c[0]||!c[2])continue;
-          const idx=parseInt(c[0],10)-1;
-          const h=out[idx];
+        for(var i=trStart;i<tradesSheet.length;i++){
+          var tc=tradesSheet[i];
+          if(!tc[0]||!tc[2])continue;
+          var idx=parseInt(tc[0],10)-1;
+          var h=out[idx];
           if(!h)continue;
-          h.trades.push({date:c[3]||'',shares:num(c[4]),price:num(c[5]),fee:num(c[6]),type:c[2]==='买入'?'buy':'sell'});
+          h.trades.push({date:tc[3]||'',shares:num(tc[4]),price:num(tc[5]),fee:num(tc[6]),type:tc[2]==='买入'?'buy':'sell'});
         }
       }
     }
 
     /* 解析费率配置 */
     if(feeSheet){
-      let fcStart=feeSheet.findIndex(r=>r.some(c=>c==='费率类型'));
+      var fcStart=-1;
+      for(var _fi=0;_fi<feeSheet.length;_fi++){if(feeSheet[_fi].some(function(c){return c==='费率类型';})){fcStart=_fi;break;}}
       if(fcStart>=0){
         fcStart+=1;
-        const newCfg=JSON.parse(JSON.stringify(FEE_CFG_DEFAULT));
-        for(let i=fcStart;i<feeSheet.length;i++){
-          const c=feeSheet[i];
-          if(!c[0]||!c[1])continue;
-          parseFeeConfigRow(newCfg,c[0],c[1],c[2]);
+        var newCfg=JSON.parse(JSON.stringify(FEE_CFG_DEFAULT));
+        for(var i=fcStart;i<feeSheet.length;i++){
+          var fc=feeSheet[i];
+          if(!fc[0]||!fc[1])continue;
+          parseFeeConfigRow(newCfg,fc[0],fc[1],fc[2]);
         }
-        if(newCfg['基金'].redeemRates)newCfg['基金'].redeemRates.sort((a,b)=>a.days-b.days);
+        if(newCfg['基金'].redeemRates)newCfg['基金'].redeemRates.sort(function(a,b){return a.days-b.days;});
         FEE_CFG=newCfg;saveFeeCfg();
       }
     }
 
     /* 有交易记录的持仓：从交易记录重算份额和成本价 */
-    out.forEach(h=>{
-      if(h.trades.length>0){
-        let runShares=0,runCostBasis=0;
-        h.trades.forEach(tr=>{
-          const s=num(tr.shares),p=num(tr.price),f=num(tr.fee);
-          if(tr.type==='buy'){runShares+=s;runCostBasis+=s*p+f;}
-          else{const curAvg=runShares>0?runCostBasis/runShares:0;runShares-=s;runCostBasis-=s*curAvg;if(runShares<0)runShares=0;if(runCostBasis<0)runCostBasis=0;}
-        });
-        h.shares=runShares;
-        h.cost=runShares>0?runCostBasis/runShares:0;
-      }else{
-        ensureTrades(h);
-      }
-    });
+    for(var _oi=0;_oi<out.length;_oi++){
+      (function(){
+        var h=out[_oi];
+        if(h.trades.length>0){
+          var runShares=0,runCostBasis=0;
+          for(var _ti2=0;_ti2<h.trades.length;_ti2++){
+            var tr=h.trades[_ti2];
+            var s=num(tr.shares),p=num(tr.price),f=num(tr.fee);
+            if(tr.type==='buy'){runShares+=s;runCostBasis+=s*p+f;}
+            else{var curAvg=runShares>0?runCostBasis/runShares:0;runShares-=s;runCostBasis-=s*curAvg;if(runShares<0)runShares=0;if(runCostBasis<0)runCostBasis=0;}
+          }
+          h.shares=runShares;
+          h.cost=runShares>0?runCostBasis/runShares:0;
+        }else{
+          ensureTrades(h);
+        }
+      })();
+    }
 
     commitImport(out);
   }catch(err){
-    // 如果数据已经提交（commitImport内部已处理），只记录日志不弹窗
-    if(data.length>0 && data===out){console.warn('[import] xlsx非致命错误（数据已导入）：',err);return;}
+    if(data.length>0){console.warn('[import] xlsx非致命错误（数据已导入）：',err);return;}
     alert('xlsx 解析失败：'+(err&&err.message||err)+'\n建议用"下载模板"填写后再导入。');
   }
 }
@@ -2079,7 +2100,7 @@ function parseSheetRows(xml,shared){
   return rows;
 }
 function colToIdx(letters){var n=0;for(var i=0;i<letters.length;i++)n=n*26+(letters.charCodeAt(i)-64);return n-1;}
-async function unzipToMap(bytes){
+function unzipToMap(bytes){
   var dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
   var map={};
   var i=0;
