@@ -379,11 +379,12 @@
         <button class="btn ghost danger" onclick="clearSnapshots()">清空历史</button>
       </div>
       <div class="tr-stats" id="trStats"></div>
-      <svg id="trChart" width="100%" height="280" viewBox="0 0 800 280" preserveAspectRatio="none" style="background:var(--panel-2);border-radius:10px;border:1px solid var(--line)"></svg>
+      <svg id="trChart" width="100%" height="280" viewBox="0 0 800 280" preserveAspectRatio="xMidYMid meet" style="background:var(--panel-2);border-radius:10px;border:1px solid var(--line);display:block"></svg>
       <div class="tr-empty" id="trEmpty" style="display:none">
         还没有可用的趋势数据<br>
-        <b>请确认持仓里至少有一条填了「购买日期」和「成本价」</b><br>
-        曲线由快照数据+各产品成本/持仓天数推算，不需要每天手动操作
+        <b>请先导入持仓数据（支持xlsx格式），或手动添加至少一条有购买日期的持仓</b><br>
+        导入后会自动从交易记录生成历史走势，无需每天手动记录<br>
+        <button class="btn" style="margin-top:12px" onclick="document.getElementById('importInput').click()">📥 导入数据</button>
       </div>
     </div>
   </div>
@@ -1913,6 +1914,7 @@ function commitImport(out){
   if(confirm('导入 '+out.length+' 条持仓？将【替换】当前所有数据。')){
     data=out;acctFilter='全部';
     out.forEach(h=>{if(h.acct&&!customAccts.includes(h.acct))customAccts.push(h.acct);});saveAccts();
+    seedHistoricalSnapshots(); // 自动从交易历史生成种子快照，让趋势图立即可用
     render();fetchFxRates();setTimeout(()=>refreshQuotes(false),400);
     toast('已导入 '+out.length+' 条持仓');
   }
@@ -2452,6 +2454,65 @@ function ensureDailySnapshot(){
   else arr.push({date:tk,value:total,cost});
   saveSnapshots(arr);return arr;
 }
+
+/* 自动从交易历史生成种子快照：导入或首次加载时调用 */
+function seedHistoricalSnapshots(){
+  if(!data.length) return;
+  let snapArr=loadSnapshots();
+  // 如果已有足够历史快照（>5个且跨度>30天），跳过
+  if(snapArr.length>5){
+    try{
+      const dates=snapArr.map(s=>new Date(s.date+'T00:00:00').getTime()).filter(t=>!isNaN(t));
+      if(dates.length>=2 && Math.max(...dates)-Math.min(...dates)>30*86400000) return;
+    }catch(e){}
+  }
+  // 收集所有交易日期作为种子点
+  const seedDates=new Set();
+  data.forEach(h=>{
+    ensureTrades(h);
+    h.trades.forEach(tr=>{
+      if(tr.date && tr.type==='buy') seedDates.add(tr.date);
+    });
+  });
+  if(!seedDates.size && data[0] && data[0].date) seedDates.add(data[0].date);
+  if(!seedDates.size) return;
+  // 按日期排序，逐日推算市值和成本
+  const sortedDates=[...seedDates].sort();
+  const today=new Date(); today.setHours(0,0,0,0);
+  const existingDates={};
+  snapArr.forEach(s=>{existingDates[s.date]=true;});
+  sortedDates.forEach(sd=>{
+    if(existingDates[sd]) return;
+    const d=new Date(sd+'T00:00:00');
+    if(d>=today) return; // 不创建未来的快照
+    // 推算当天的市值和成本
+    let value=0, cost=0;
+    data.forEach(h=>{
+      ensureTrades(h);
+      const fx=num(h.fx)||1;
+      let dayShares=0, dayCostBasis=0;
+      h.trades.forEach(tr=>{
+        const td=tr.date?new Date(tr.date+'T00:00:00'):null;
+        if(td&&isNaN(td))return;
+        const tt=td?td.getTime():0;
+        if(tt>d.getTime()) return;
+        if(tr.type==='buy'){dayShares+=num(tr.shares);dayCostBasis+=num(tr.shares)*num(tr.price)+num(tr.fee||0);}
+        else if(tr.type==='sell'){
+          const ca=dayShares>0?dayCostBasis/dayShares:0;
+          dayShares-=num(tr.shares);dayCostBasis-=num(tr.shares)*ca;
+          if(dayShares<0)dayShares=0;if(dayCostBasis<0)dayCostBasis=0;
+        }
+      });
+      if(dayShares<=0) return;
+      cost+=dayCostBasis*fx;
+      value+=dayShares*num(h.cost)*fx; // 种子快照按成本价估值
+    });
+    snapArr.push({date:sd,value,cost});
+  });
+  // 排序后保存
+  snapArr.sort((a,b)=>a.date.localeCompare(b.date));
+  saveSnapshots(snapArr);
+}
 function snapshotNow(){ensureDailySnapshot();renderTrend();toast('已记录当前快照');}
 function clearSnapshots(){if(confirm('清空所有历史快照？此操作不可恢复（不影响持仓数据）。')){saveSnapshots([]);renderTrend();}}
 function setTrRange(d){trRange=d;
@@ -2567,8 +2628,17 @@ function renderTrend(){
   empty.style.display='none';svg.style.display='block';
   const W=800,H=280,PAD={l:64,r:20,t:20,b:30};
   const ys=arr.map(x=>x.value), cs=arr.map(x=>x.cost);
-  const minY=Math.min(...ys,...cs), maxY=Math.max(...ys,...cs);
-  const padY=(maxY-minY)*0.1||maxY*0.05||1;
+  // 防御：过滤无效数据
+  const validYs=ys.filter(v=>isFinite(v)&&v>=0);
+  const validCs=cs.filter(v=>isFinite(v)&&v>=0);
+  if(validYs.length<2){
+    empty.style.display='block';svg.style.display='none';
+    stats.innerHTML='';
+    return;
+  }
+  const minY=Math.min(...validYs,...validCs), maxY=Math.max(...validYs,...validCs);
+  // 如果最大最小相同（平线），强制给一个范围
+  const padY=(maxY-minY)>0.01?(maxY-minY)*0.1:(maxY>0?maxY*0.05:1);
   const yLo=Math.max(0,minY-padY), yHi=maxY+padY;
   const sx=i=>PAD.l+(W-PAD.l-PAD.r)*(arr.length<=1?0.5:i/(arr.length-1));
   const sy=v=>PAD.t+(H-PAD.t-PAD.b)*(1-(v-yLo)/(yHi-yLo||1));
@@ -2610,6 +2680,7 @@ function renderTrend(){
 }
 
 render();
+if(data.length) seedHistoricalSnapshots(); // 有数据时自动补齐历史种子快照
 fetchFxRates();
 ensureDailySnapshot();
 setTimeout(()=>refreshQuotes(false),600);
