@@ -2515,67 +2515,71 @@ function ensureDailySnapshot(){
 /* 自动从交易历史生成种子快照：导入或首次加载时调用 */
 function seedHistoricalSnapshots(){
   if(!data.length) return;
-  let snapArr=loadSnapshots();
-  // 如果已有足够历史快照（>5个且跨度>30天），跳过
+  var snapArr=loadSnapshots();
   if(snapArr.length>5){
     try{
-      const dates=snapArr.map(s=>new Date(s.date+'T00:00:00').getTime()).filter(t=>!isNaN(t));
-      if(dates.length>=2 && Math.max(...dates)-Math.min(...dates)>30*86400000) return;
+      var dates=[];
+      for(var _di=0;_di<snapArr.length;_di++){var _dt=new Date(snapArr[_di].date+'T00:00:00').getTime();if(!isNaN(_dt))dates.push(_dt);}
+      if(dates.length>=2 && Math.max.apply(Math,dates)-Math.min.apply(Math,dates)>30*86400000) return;
     }catch(e){}
   }
-  // 收集所有交易日期和持仓日期作为种子点
-  const seedDates=new Set();
-  data.forEach(h=>{
-    ensureTrades(h);
-    h.trades.forEach(tr=>{
-      if(tr.date && tr.type==='buy') seedDates.add(tr.date);
-    });
-    // 也用持仓的买入日期作为种子
-    if(h.date) seedDates.add(h.date);
-  });
-  if(!seedDates.size) return;
-  // 按日期排序，逐日推算市值和成本
-  const sortedDates=[...seedDates].sort();
-  const today=new Date(); today.setHours(0,0,0,0);
-  const existingDates={};
-  snapArr.forEach(s=>{existingDates[s.date]=true;});
-  sortedDates.forEach(sd=>{
-    if(existingDates[sd]) return;
-    const d=new Date(sd+'T00:00:00');
-    if(d>=today) return; // 不创建未来的快照
-    // 推算当天的市值和成本
-    let value=0, cost=0;
-    data.forEach(h=>{
-      ensureTrades(h);
-      const fx=num(h.fx)||1;
-      let dayShares=0, dayCostBasis=0;
-      // 如果 h.date 为空，ensureTrades 用 todayKey() 填充，导致历史种子日期无法计算
-      const hasValidBuyDate=!!h.date;
-      h.trades.forEach(tr=>{
-        const td=tr.date?new Date(tr.date+'T00:00:00'):null;
-        if(td&&isNaN(td))return;
-        const tt=td?td.getTime():0;
-        if(tt>d.getTime()) return;
-        if(tr.type==='buy'){dayShares+=num(tr.shares);dayCostBasis+=num(tr.shares)*num(tr.price)+num(tr.fee||0);}
-        else if(tr.type==='sell'){
-          const ca=dayShares>0?dayCostBasis/dayShares:0;
-          dayShares-=num(tr.shares);dayCostBasis-=num(tr.shares)*ca;
+  var seedDates={};
+  var hasAnyDate=false;
+  for(var _hi=0;_hi<data.length;_hi++){
+    var h=data[_hi];ensureTrades(h);
+    for(var _ti=0;_ti<h.trades.length;_ti++){var tr=h.trades[_ti];if(tr.date&&tr.type==='buy'){seedDates[tr.date]=1;hasAnyDate=true;}}
+    if(h.date){seedDates[h.date]=1;hasAnyDate=true;}
+  }
+  // 关键修复：没有任何日期时，生成"今天往前30天"的平直基线
+  // 解决导入无日期xlsx后趋势图完全空白的问题
+  if(!hasAnyDate){
+    var _today=new Date();_today.setHours(0,0,0,0);
+    for(var _back=30;_back>=0;_back--){
+      var _sd=new Date(_today.getTime()-_back*86400000);
+      seedDates[dayKey(_sd)]=1;
+    }
+  }
+  var sKeys=[];
+  for(var _sk in seedDates){if(seedDates.hasOwnProperty(_sk))sKeys.push(_sk);}
+  sKeys.sort();
+  var today2=new Date();today2.setHours(0,0,0,0);
+  var existingDates={};
+  for(var _ei=0;_ei<snapArr.length;_ei++)existingDates[snapArr[_ei].date]=true;
+  for(var _si2=0;_si2<sKeys.length;_si2++){
+    var sd=sKeys[_si2];
+    if(existingDates[sd])continue;
+    var d=new Date(sd+'T00:00:00');
+    if(d>=today2)continue;
+    var value=0,cost=0;
+    for(var _hi2=0;_hi2<data.length;_hi2++){
+      var h2=data[_hi2];ensureTrades(h2);
+      var fx=num(h2.fx)||1;
+      var dayShares=0,dayCostBasis=0;
+      var hasValidBuyDate=!!h2.date;
+      for(var _ti2=0;_ti2<h2.trades.length;_ti2++){
+        var tr2=h2.trades[_ti2];
+        var td=tr2.date?new Date(tr2.date+'T00:00:00'):null;
+        if(td&&isNaN(td))continue;
+        var tt=td?td.getTime():0;
+        if(tt>d.getTime())continue;
+        if(tr2.type==='buy'){dayShares+=num(tr2.shares);dayCostBasis+=num(tr2.shares)*num(tr2.price)+num(tr2.fee||0);}
+        else if(tr2.type==='sell'){
+          var ca=dayShares>0?dayCostBasis/dayShares:0;
+          dayShares-=num(tr2.shares);dayCostBasis-=num(tr2.shares)*ca;
           if(dayShares<0)dayShares=0;if(dayCostBasis<0)dayCostBasis=0;
         }
-      });
-      // 如果没有有效买入日期且当天没有交易数据，视为从earliest就持有
-      if(!hasValidBuyDate && dayShares<=0){
-        dayShares=num(h.shares);
-        dayCostBasis=num(h.shares)*num(h.cost);
       }
-      if(dayShares<=0) return;
+      if(!hasValidBuyDate && dayShares<=0){
+        dayShares=num(h2.shares);
+        dayCostBasis=num(h2.shares)*num(h2.cost);
+      }
+      if(dayShares<=0)continue;
       cost+=dayCostBasis*fx;
-      value+=dayShares*num(h.cost)*fx; // 种子快照按成本价估值
-    });
-    snapArr.push({date:sd,value,cost});
-  });
-  // 排序后保存
-  snapArr.sort((a,b)=>a.date.localeCompare(b.date));
+      value+=dayShares*num(h2.cost)*fx;
+    }
+    snapArr.push({date:sd,value:value,cost:cost});
+  }
+  snapArr.sort(function(a,b){return a.date.localeCompare(b.date);});
   saveSnapshots(snapArr);
 }
 function snapshotNow(){ensureDailySnapshot();renderTrend();toast('已记录当前快照');}
@@ -2699,13 +2703,14 @@ function buildTrendSeries(){
   return series;
 }
 
-let _seedDone=false; // 避免重复seed
+let _seedDone=false;
 function renderTrend(){
-  // 不再检查active——确保切换tab时一定能渲染
-  // 先确保有快照数据（仅首次）
+  // 每次渲染都更新今日快照（价格可能刚刷新）
+  if(data.length) ensureDailySnapshot();
+  // 仅在首次或数据变化后重新生成种子快照
   if(data.length && !_seedDone){
     seedHistoricalSnapshots();
-    ensureDailySnapshot();
+    ensureDailySnapshot(); // 再次更新（seed后可能有新快照）
     _seedDone=true;
   }
   let arr=buildTrendSeries();
