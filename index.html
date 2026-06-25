@@ -2129,10 +2129,10 @@ var DIST_BASE=[1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1
 var DIST_EXTRA=[0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13];
 
 function jsInflate(bits){
-  var out=[];
+  var out=[],j,rep,m,k;
   while(true){
     var bfinal=bits.readBits(1),btype=bits.readBits(2);
-    if(btype===0){bits.alignByte();var len=bits.readBits(16),nlen=bits.readBits(16);var data=bits.readBytes(len);for(var k=0;k<data.length;k++)out.push(data[k]);}
+    if(btype===0){bits.alignByte();var len=bits.readBits(16),nlen=bits.readBits(16);var data=bits.readBytes(len);for(k=0;k<data.length;k++)out.push(data[k]);}
     else if(btype===1||btype===2){
       var lt,dt;
       if(btype===1){lt=FIXED_LIT_LENS;dt=FIXED_DIST_LENS;}
@@ -2143,7 +2143,7 @@ function jsInflate(bits){
         var total=HLIT+HDIST,codeLens=[],ci=0;
         while(ci<total){var s=decodeHuffSym(bits,clt);
           if(s<=15){codeLens.push(s);ci++;}
-          else if(s===16){var rep=3+bits.readBits(2),prev=codeLens[codeLens.length-1]||0;for(var j=0;j<rep;j++)codeLens.push(prev);ci+=rep;}
+          else if(s===16){rep=3+bits.readBits(2);var prev=codeLens[codeLens.length-1]||0;for(j=0;j<rep;j++)codeLens.push(prev);ci+=rep;}
           else if(s===17){rep=3+bits.readBits(3);for(j=0;j<rep;j++)codeLens.push(0);ci+=rep;}
           else if(s===18){rep=11+bits.readBits(7);for(j=0;j<rep;j++)codeLens.push(0);ci+=rep;}}
         var ll=codeLens.slice(0,HLIT),dl=codeLens.slice(HLIT);
@@ -2156,7 +2156,7 @@ function jsInflate(bits){
           var li=sym2-257,length=LEN_BASE[li]+(LEN_EXTRA[li]?bits.readBits(LEN_EXTRA[li]):0);
           var di=decodeHuffSym(bits,dt);
           var distance=DIST_BASE[di]+(DIST_EXTRA[di]?bits.readBits(DIST_EXTRA[di]):0);
-          var start=out.length-distance;for(var m=0;m<length;m++)out.push(start+m>=0?out[start+m]:0);}}
+          var start=out.length-distance;for(m=0;m<length;m++)out.push(start+m>=0?out[start+m]:0);}}
     }else throw new Error('无效块类型'+btype);
     if(bfinal)break;
   }
