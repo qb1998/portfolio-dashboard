@@ -1914,7 +1914,9 @@ function commitImport(out){
   if(confirm('导入 '+out.length+' 条持仓？将【替换】当前所有数据。')){
     data=out;acctFilter='全部';
     out.forEach(h=>{if(h.acct&&!customAccts.includes(h.acct))customAccts.push(h.acct);});saveAccts();
-    seedHistoricalSnapshots(); // 自动从交易历史生成种子快照，让趋势图立即可用
+    _seedDone=false; // 重置：新数据导入后需要重新生成种子快照
+    seedHistoricalSnapshots(); // 立即从交易历史生成快照
+    ensureDailySnapshot();     // 记录今日快照
     render();fetchFxRates();setTimeout(()=>refreshQuotes(false),400);
     toast('已导入 '+out.length+' 条持仓');
   }
@@ -1922,7 +1924,7 @@ function commitImport(out){
 async function importXlsx(bytes){
   try{
     /* Step 1: 解压 */
-    const map=await unzipToMap(bytes);
+    var map=unzipToMap(bytes);
     const sheetKeys=Object.keys(map).filter(k=>/xl\/worksheets\/.*\.xml$/i.test(k)).sort();
     if(!sheetKeys.length){alert('未找到工作表');return;}
 
@@ -2009,7 +2011,11 @@ async function importXlsx(bytes){
     });
 
     commitImport(out);
-  }catch(err){alert('xlsx 解析失败：'+(err&&err.message||err)+'\n建议用"下载模板"填写后再导入。');}
+  }catch(err){
+    // 如果数据已经提交（commitImport内部已处理），只记录日志不弹窗
+    if(data.length>0 && data===out){console.warn('[import] xlsx非致命错误（数据已导入）：',err);return;}
+    alert('xlsx 解析失败：'+(err&&err.message||err)+'\n建议用"下载模板"填写后再导入。');
+  }
 }
 function parseFeeConfigRow(cfg,type,param,val){
   const v=String(val||'').trim();
@@ -2044,53 +2050,53 @@ function parseFeeConfigRow(cfg,type,param,val){
 }
 function unescapeXml(s){return String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');}
 function parseSheetRows(xml,shared){
-  const rows=[];
-  const rowMatches=xml.match(/<row[\s\S]*?<\/row>/g)||[];
-  rowMatches.forEach(rowXml=>{
-    const cells=[];
-    const cMatches=rowXml.match(/<c\b[^>]*\/>|<c\b[\s\S]*?<\/c>/g)||[];
-    cMatches.forEach(cXml=>{
-      const refM=cXml.match(/r="([A-Z]+)\d+"/);
-      const col=refM?colToIdx(refM[1]):cells.length;
-      const isShared=/t="s"/.test(cXml);
-      const isInline=/t="(inlineStr|str)"/.test(cXml);
-      let val='';
+  var rows=[];
+  var rowMatches=xml.match(/<row[\s\S]*?<\/row>/g)||[];
+  for(var ri=0;ri<rowMatches.length;ri++){var rowXml=rowMatches[ri];
+    var cells=[];
+    var cMatches=rowXml.match(/<c\b[^>]*\/>|<c\b[\s\S]*?<\/c>/g)||[];
+    for(var ci=0;ci<cMatches.length;ci++){var cXml=cMatches[ci];
+      var refM=cXml.match(/r="([A-Z]+)\d+"/);
+      var col=refM?colToIdx(refM[1]):cells.length;
+      var isShared=/t="s"/.test(cXml);
+      var isInline=/t="(inlineStr|str)"/.test(cXml);
+      var val='';
       if(isInline){
-        const tM=cXml.match(/<t[^>]*>([\s\S]*?)<\/t>/);
+        var tM=cXml.match(/<t[^>]*>([\s\S]*?)<\/t>/);
         val=tM?unescapeXml(tM[1]):'';
-        if(!tM){const vM=cXml.match(/<v>([\s\S]*?)<\/v>/);val=vM?unescapeXml(vM[1]):'';}
+        if(!tM){var vM2=cXml.match(/<v>([\s\S]*?)<\/v>/);val=vM2?unescapeXml(vM2[1]):'';}
       }else{
-        const vM=cXml.match(/<v>([\s\S]*?)<\/v>/);
-        const raw=vM?vM[1]:'';
+        var vM=cXml.match(/<v>([\s\S]*?)<\/v>/);
+        var raw=vM?vM[1]:'';
         if(isShared){val=shared[parseInt(raw,10)]||'';}
         else val=raw;
       }
       cells[col]=val;
-    });
-    for(let i=0;i<cells.length;i++)if(cells[i]===undefined)cells[i]='';
+    }
+    for(var i=0;i<cells.length;i++)if(cells[i]===undefined)cells[i]='';
     rows.push(cells);
-  });
+  }
   return rows;
 }
-function colToIdx(letters){let n=0;for(let i=0;i<letters.length;i++)n=n*26+(letters.charCodeAt(i)-64);return n-1;}
+function colToIdx(letters){var n=0;for(var i=0;i<letters.length;i++)n=n*26+(letters.charCodeAt(i)-64);return n-1;}
 async function unzipToMap(bytes){
-  const dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
-  const map={};
-  let i=0;
+  var dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  var map={};
+  var i=0;
   while(i+4<=bytes.length){
-    const sig=dv.getUint32(i,true);
+    var sig=dv.getUint32(i,true);
     if(sig!==0x04034b50)break;
-    const method=dv.getUint16(i+8,true);
-    const compSize=dv.getUint32(i+18,true);
-    const nameLen=dv.getUint16(i+26,true);
-    const extraLen=dv.getUint16(i+28,true);
-    const nameStart=i+30;
-    const name=new TextDecoder().decode(bytes.slice(nameStart,nameStart+nameLen));
-    const dataStart=nameStart+nameLen+extraLen;
-    const comp=bytes.slice(dataStart,dataStart+compSize);
-    let content;
+    var method=dv.getUint16(i+8,true);
+    var compSize=dv.getUint32(i+18,true);
+    var nameLen=dv.getUint16(i+26,true);
+    var extraLen=dv.getUint16(i+28,true);
+    var nameStart=i+30;
+    var name=new TextDecoder().decode(bytes.slice(nameStart,nameStart+nameLen));
+    var dataStart=nameStart+nameLen+extraLen;
+    var comp=bytes.slice(dataStart,dataStart+compSize);
+    var content;
     if(method===0){content=comp;}
-    else if(method===8){content=await inflateRaw(comp);}
+    else if(method===8){content=inflateRaw(comp);}
     else{content=comp;}
     map[name]=content;
     i=dataStart+compSize;
@@ -2205,14 +2211,14 @@ function jsInflate(bits){
   return new Uint8Array(out);
 }
 
-async function inflateRaw(comp){
+function inflateRaw(comp){
   try{return jsInflate(new BitsReader(comp));}
   catch(e){throw new Error('xlsx解压失败：'+(e&&e.message?e.message:String(e))+'\n请确认文件是有效的xlsx格式。');}
 }
 
 function parseLine(line){
-  const res=[];let cur='',q=false;
-  for(let i=0;i<line.length;i++){const ch=line[i];
+  var res=[],cur='',q=false;
+  for(var i=0;i<line.length;i++){var ch=line[i];
     if(q){if(ch==='"'){if(line[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=ch;}
     else{if(ch==='"')q=true;else if(ch===','){res.push(cur);cur='';}else cur+=ch;}}
   res.push(cur);return res;
