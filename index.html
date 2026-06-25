@@ -2497,8 +2497,8 @@ function drawOvDonut(parts,total){
 }
 
 /* ----- 收益趋势：快照 + 交易感知的插值 ----- */
-function loadSnapshots(){try{const r=localStorage.getItem(SNAP_KEY);if(r)return JSON.parse(r);}catch(e){}return [];}
-function saveSnapshots(arr){localStorage.setItem(SNAP_KEY,JSON.stringify(arr));}
+function loadSnapshots(){try{var r=localStorage.getItem(SNAP_KEY);if(r)return JSON.parse(r);}catch(e){}return [];}
+function saveSnapshots(arr){for(var _vi=0;_vi<arr.length;_vi++)arr[_vi]._ver=_SNAP_VER;localStorage.setItem(SNAP_KEY,JSON.stringify(arr));}
 function todayKey(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function dayKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 
@@ -2600,15 +2600,19 @@ function setTrRange(d){trRange=d;
 
 // 核心：根据持仓+交易历史+快照，反推每日市值/成本曲线
 // 注意：整个函数链必须用 var 声明，避免 Safari TDZ 错误
+var _SNAP_VER=3; // 快照格式版本号，变更时自动清除旧快照
 function buildTrendSeries(){
   if(!data.length)return [];
   var today=new Date(); today.setHours(0,0,0,0);
 
-  var snapArr=loadSnapshots();
+  // 加载快照，但检查版本号（旧格式直接忽略）
+  var rawSnaps=loadSnapshots();
+  var snapArr=[];
+  for(var _rv=0;_rv<rawSnaps.length;_rv++){if(rawSnaps[_rv]._ver===_SNAP_VER)snapArr.push(rawSnaps[_rv]);}
   var snapMap={};
   for(var _si=0;_si<snapArr.length;_si++){var s=snapArr[_si];snapMap[s.date]={value:s.value,cost:s.cost};}
 
-  // ===== 第一步：分类持仓（有日期信息 vs 无日期信息） =====
+  // ===== 检查是否有任何日期信息 =====
   var earliest=null;
   var hasAnyDated=false;
   for(var _hi=0;_hi<data.length;_hi++){
@@ -2631,25 +2635,30 @@ function buildTrendSeries(){
     h._hasDateInfo=holdingHasDate;
   }
 
-  // ===== 第二步：没有任何日期信息时 → 生成短期平直基线 =====
-  if(!earliest||(today.getTime()-earliest.getTime())<7*86400000){
+  // ===== 完全没有日期信息 → 简洁的平直基线（不依赖任何存储快照） =====
+  if(!hasAnyDated){
     var baseVal=0,baseCost=0;
     for(var _bi=0;_bi<data.length;_bi++){var bh=data[_bi];ensureTrades(bh);var bc=compute(bh);baseVal+=bc.value;baseCost+=bc.cost;}
     var blines=[];
     var bStart=new Date(today.getTime()-14*86400000);
     for(var bt=bStart.getTime();bt<=today.getTime();bt+=86400000){
-      var bdt=new Date(bt);var bk=dayKey(bdt);
-      var isTodaySnap=!!snapMap[bk];
-      blines.push({date:bk,value:isTodaySnap?snapMap[bk].value:baseVal,cost:isTodaySnap?snapMap[bk].cost:baseCost,actual:isTodaySnap});
+      var bdt=new Date(bt);
+      blines.push({date:dayKey(bdt),value:baseVal,cost:baseCost,actual:false});
     }
+    // 今天用实际快照覆盖（如果有）
+    var tk=dayKey(today);
+    if(snapMap[tk]){blines[blines.length-1]={date:tk,value:snapMap[tk].value,cost:snapMap[tk].cost,actual:true};}
+    console.log('[Trend] 无日期数据：生成',blines.length,'天平直基线 val=',baseVal,' cost=',baseCost);
     return blines;
   }
 
-  // ===== 第三步：正常情况 —— 有历史日期 =====
+  // ===== 有日期信息时的正常计算 =====
+  if((today.getTime()-earliest.getTime())<7*86400000){
+    earliest=new Date(today.getTime()-14*86400000);
+  }
   var minDate=new Date(today.getTime()-5*365*86400000);
   if(earliest<minDate)earliest=minDate;
 
-  // 计算无日期持仓的当前市值/成本（作为常数偏移量）
   var undatedVal=0,undatedCost=0;
   for(var _ui=0;_ui<data.length;_ui++){
     var uh=data[_ui];
@@ -2667,7 +2676,7 @@ function buildTrendSeries(){
 
     for(var _hi2=0;_hi2<data.length;_hi2++){
       var h2=data[_hi2];
-      if(!h2._hasDateInfo)continue; // 无日期的已作为常量处理
+      if(!h2._hasDateInfo)continue;
 
       ensureTrades(h2);
       var fx=num(h2.fx)||1;
@@ -2693,10 +2702,8 @@ function buildTrendSeries(){
       }
       if(dayShares<=0)continue;
 
-      var avgCostPx=dayCostBasis/dayShares;
       cost+=dayCostBasis*fx;
 
-      // 价格插值
       var firstBuyDate=null;
       for(var _ti3=0;_ti3<h2.trades.length;_ti3++){
         var tr3=h2.trades[_ti3];
@@ -2705,6 +2712,7 @@ function buildTrendSeries(){
           if(!isNaN(bd)&&(!firstBuyDate||bd<firstBuyDate))firstBuyDate=bd;
         }
       }
+      var avgCostPx=dayCostBasis/dayShares;
       var px=avgCostPx;
       if(firstBuyDate&&curPx){
         var span=today.getTime()-firstBuyDate.getTime();
