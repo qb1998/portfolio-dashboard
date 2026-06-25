@@ -2097,87 +2097,117 @@ async function unzipToMap(bytes){
   }
   return map;
 }
-/* ============ 纯 JS inflate 解压器（RFC 1951）兼容所有浏览器 ============ */
+/* ============ 纯 JS inflate 解压器（RFC 1951）全var声明兼容Safari ============ */
 function BitsReader(buf){this.buf=buf;this.pos=0;this.bitBuf=0;this.bitCnt=0;}
 BitsReader.prototype.readBits=function(n){
-  while(this.bitCnt<n){const b=this.buf[this.pos++];if(b===undefined)throw new Error('数据结束');this.bitBuf|=b<<this.bitCnt;this.bitCnt+=8;}
-  const v=this.bitBuf&((1<<n)-1);this.bitBuf>>=n;this.bitCnt-=n;return v;
+  var self=this;
+  while(self.bitCnt<n){
+    var b=self.buf[self.pos];self.pos++;
+    if(b===undefined||b===null)throw new Error('inflate数据意外结束(pos='+self.pos+')');
+    self.bitBuf=self.bitBuf|(b<<self.bitCnt);
+    self.bitCnt=self.bitCnt+8;
+  }
+  var v=self.bitBuf&((1<<n)-1);self.bitBuf=self.bitBuf>>n;self.bitCnt=self.bitCnt-n;return v;
 };
-BitsReader.prototype.alignByte=function(){this.bitCnt-=this.bitCnt&7;if(this.bitCnt<0)this.bitCnt=0;this.bitBuf&=(1<<this.bitCnt)-1;};
-BitsReader.prototype.readBytes=function(n){this.alignByte();const r=this.buf.slice(this.pos,this.pos+n);this.pos+=n;return r;};
+BitsReader.prototype.alignByte=function(){var e=this.bitCnt&7;this.bitCnt=this.bitCnt-e;if(this.bitCnt<0)this.bitCnt=0;this.bitBuf=this.bitBuf&((1<<this.bitCnt)-1);};
+BitsReader.prototype.readBytes=function(n){
+  this.alignByte();
+  var r=new Uint8Array(n);var i;
+  for(i=0;i<n;i++){r[i]=this.buf[this.pos];this.pos++;}
+  return r;
+};
 function buildHuffLens(lengths){
-  const maxBits=lengths.length?Math.max(...lengths.filter(function(l){return l>0;}),0):0;if(maxBits===0)return[];
-  const blCount=new Array(maxBits+1).fill(0);lengths.forEach(function(l){if(l>0)blCount[l]++;});
-  let nextCode=0,codeArr=new Array(maxBits+1).fill(0);for(let b=1;b<=maxBits;b++){nextCode=(nextCode+blCount[b-1])<<1;codeArr[b]=nextCode;}
-  const table=[];lengths.forEach(function(symLen,symIdx){if(symLen>0){table[symIdx]={code:codeArr[symLen]++,len:symLen};}});
+  var maxBits=0;var i,len;
+  for(i=0;i<lengths.length;i++){if(lengths[i]>maxBits)maxBits=lengths[i];}
+  if(maxBits===0)return [];
+  var blCount=[];for(i=0;i<=maxBits;i++)blCount[i]=0;
+  for(i=0;i<lengths.length;i++){len=lengths[i];if(len>0)blCount[len]=blCount[len]+1;}
+  var nextCode=0;var codeArr=[];for(i=0;i<=maxBits;i++)codeArr[i]=0;
+  var b;for(b=1;b<=maxBits;b++){nextCode=(nextCode+blCount[b-1])<<1;codeArr[b]=nextCode;}
+  var table=[];var symIdx,symLen,entry;
+  for(symIdx=0;symIdx<lengths.length;symIdx++){
+    symLen=lengths[symIdx];
+    if(symLen>0){entry={code:codeArr[symLen],len:symLen};codeArr[symLen]=codeArr[symLen]+1;table[symIdx]=entry;}
+  }
   return table;
 }
 function decodeHuffSym(bits,huffTable){
-  let code=0,len=0;
-  while(true){code=(code<<1)|bits.readBits(1);len++;
-    for(let i=0;i<huffTable.length;i++){var e=huffTable[i];if(e&&e.len===len&&e.code===code)return i;}
-    if(len>15)throw new Error('无效Huffman码');}
+  var code=0,len=0,i,e;
+  while(true){
+    code=(code<<1)|bits.readBits(1);len=len+1;
+    if(len>20)throw new Error('Huffman码超长(len='+len+')');
+    for(i=0;i<huffTable.length;i++){
+      e=huffTable[i];if(e!==undefined&&e!==null&&e.len===len&&e.code===code)return i;
+    }
+  }
 }
 var FIXED_LIT_LENS=(function(){
-  var l=new Array(288);for(let i=0;i<=143;i++)l[i]=8;for(let i=144;i<=255;i++)l[i]=9;
-  for(let i=256;i<=279;i++)l[i]=7;for(let i=280;i<=287;i++)l[i]=8;return buildHuffLens(l);
+  var l=[];var i;
+  for(i=0;i<=143;i++)l[i]=8;for(i=144;i<=255;i++)l[i]=9;
+  for(i=256;i<=279;i++)l[i]=7;for(i=280;i<=287;i++)l[i]=8;
+  return buildHuffLens(l);
 })();
-var FIXED_DIST_LENS=(function(){var l=new Array(32).fill(5);return buildHuffLens(l);})();
+var FIXED_DIST_LENS=(function(){var l=[];var i;for(i=0;i<32;i++)l[i]=5;return buildHuffLens(l);})();
 var LEN_BASE=[3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258];
 var LEN_EXTRA=[0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0];
 var DIST_BASE=[1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577];
 var DIST_EXTRA=[0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13];
 
 function jsInflate(bits){
-  var out=[],j,rep,m,k;
+  var out=[],j,rep,m,k,sym2,li,length,di,distance,start,bfinal,btype;
+  var lt,dt,HLIT,HDIST,HCLEN;
+  var clenOrd,clenArr,ci0,clt,total,codeLens,ci,s,prev,ll,dl,zi,data,len;
   while(true){
-    var bfinal=bits.readBits(1),btype=bits.readBits(2);
-    if(btype===0){bits.alignByte();var len=bits.readBits(16),nlen=bits.readBits(16);var data=bits.readBytes(len);for(k=0;k<data.length;k++)out.push(data[k]);}
-    else if(btype===1||btype===2){
-      var lt,dt;
+    bfinal=bits.readBits(1);btype=bits.readBits(2);
+    if(btype===0){
+      bits.alignByte();len=bits.readBits(16);bits.readBits(16);data=bits.readBytes(len);
+      for(k=0;k<len;k++)out.push(data[k]);
+    }else if(btype===1||btype===2){
       if(btype===1){lt=FIXED_LIT_LENS;dt=FIXED_DIST_LENS;}
-      else{var HLIT=bits.readBits(4)+4,HDIST=bits.readBits(4)+4,HCLEN=bits.readBits(4)+19;
-        var clenOrd=[16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15],clenArr=new Array(19).fill(0);
-        for(var ci0=0;ci0<HCLEN;ci0++)clenArr[clenOrd[ci0]]=bits.readBits(3);
-        var clt=buildHuffLens(clenArr);
-        var total=HLIT+HDIST,codeLens=[],ci=0;
-        while(ci<total){var s=decodeHuffSym(bits,clt);
-          if(s<=15){codeLens.push(s);ci++;}
-          else if(s===16){rep=3+bits.readBits(2);var prev=codeLens[codeLens.length-1]||0;for(j=0;j<rep;j++)codeLens.push(prev);ci+=rep;}
-          else if(s===17){rep=3+bits.readBits(3);for(j=0;j<rep;j++)codeLens.push(0);ci+=rep;}
-          else if(s===18){rep=11+bits.readBits(7);for(j=0;j<rep;j++)codeLens.push(0);ci+=rep;}}
-        var ll=codeLens.slice(0,HLIT),dl=codeLens.slice(HLIT);
+      else{
+        HLIT=bits.readBits(4)+4;HDIST=bits.readBits(4)+4;HCLEN=bits.readBits(4)+19;
+        clenOrd=[16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15];
+        clenArr=[];for(ci0=0;ci0<19;ci0++)clenArr[ci0]=0;
+        for(ci0=0;ci0<HCLEN;ci0++)clenArr[clenOrd[ci0]]=bits.readBits(3);
+        clt=buildHuffLens(clenArr);
+        total=HLIT+HDIST;codeLens=[];ci=0;
+        while(ci<total){
+          s=decodeHuffSym(bits,clt);
+          if(s<=15){codeLens.push(s);ci=ci+1;}
+          else if(s===16){rep=3+bits.readBits(2);prev=(codeLens.length>0)?codeLens[codeLens.length-1]:0;for(j=0;j<rep;j++)codeLens.push(prev);ci=ci+rep;}
+          else if(s===17){rep=3+bits.readBits(3);for(j=0;j<rep;j++)codeLens.push(0);ci=ci+rep;}
+          else if(s===18){rep=11+bits.readBits(7);for(j=0;j<rep;j++)codeLens.push(0);ci=ci+rep;}
+          else{throw new Error('动态码表无效符号 s='+s);}
+        }
+        ll=[];dl=[];
+        for(zi=0;zi<HLIT;zi++){ll[zi]=(zi<codeLens.length)?codeLens[zi]:0;}
+        for(zi=0;zi<HDIST;zi++){dl[zi]=((zi+HLIT)<codeLens.length)?codeLens[zi+HLIT]:0;}
         while(ll.length<288)ll.push(0);while(dl.length<32)dl.push(0);
-        lt=buildHuffLens(ll);dt=buildHuffLens(dl);}
-      while(true){
-        var sym2=decodeHuffSym(bits,lt);
-        if(sym2===256)break;
-        if(sym2<256){out.push(sym2);}else{
-          var li=sym2-257,length=LEN_BASE[li]+(LEN_EXTRA[li]?bits.readBits(LEN_EXTRA[li]):0);
-          var di=decodeHuffSym(bits,dt);
-          var distance=DIST_BASE[di]+(DIST_EXTRA[di]?bits.readBits(DIST_EXTRA[di]):0);
-          var start=out.length-distance;for(m=0;m<length;m++)out.push(start+m>=0?out[start+m]:0);}}
-    }else throw new Error('无效块类型'+btype);
+        lt=buildHuffLens(ll);dt=buildHuffLens(dl);
+      }
+      var decoding=true;
+      while(decoding){
+        sym2=decodeHuffSym(bits,lt);
+        if(sym2===256){decoding=false;break;}
+        if(sym2<256){out.push(sym2);}
+        else{
+          li=sym2-257;length=LEN_BASE[li];
+          if(LEN_EXTRA[li]>0)length=length+bits.readBits(LEN_EXTRA[li]);
+          di=decodeHuffSym(bits,dt);distance=DIST_BASE[di];
+          if(DIST_EXTRA[di]>0)distance=distance+bits.readBits(DIST_EXTRA[di]);
+          start=out.length-distance;
+          for(m=0;m<length;m++){if(start+m>=0)out.push(out[start+m]);else out.push(0);}
+        }
+      }
+    }else{throw new Error('无效块类型 '+btype);}
     if(bfinal)break;
   }
   return new Uint8Array(out);
 }
 
 async function inflateRaw(comp){
-  /* Safari/iOS 对 deflate-raw 的 DecompressionStream 会抛出不可捕获的 TDZ 错误
-     因此优先使用纯JS实现（兼容所有浏览器），仅在Chrome/Edge才尝试API */
   try{return jsInflate(new BitsReader(comp));}
-  catch(e){
-    if(typeof DecompressionStream!=='undefined'){
-      try{
-        var ds=new DecompressionStream('deflate-raw');
-        var stream=new Blob([comp]).stream().pipeThrough(ds);
-        var buf=await new Response(stream).arrayBuffer();
-        return new Uint8Array(buf);
-      }catch(_e){/* JS实现失败且API也不可用 */}
-    }
-    throw new Error('解压失败：'+(e&&e.message||e)+'\n请确认文件是有效的xlsx格式。');
-  }
+  catch(e){throw new Error('xlsx解压失败：'+(e&&e.message?e.message:String(e))+'\n请确认文件是有效的xlsx格式。');}
 }
 
 function parseLine(line){
