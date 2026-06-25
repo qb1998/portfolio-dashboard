@@ -2466,15 +2466,16 @@ function seedHistoricalSnapshots(){
       if(dates.length>=2 && Math.max(...dates)-Math.min(...dates)>30*86400000) return;
     }catch(e){}
   }
-  // 收集所有交易日期作为种子点
+  // 收集所有交易日期和持仓日期作为种子点
   const seedDates=new Set();
   data.forEach(h=>{
     ensureTrades(h);
     h.trades.forEach(tr=>{
       if(tr.date && tr.type==='buy') seedDates.add(tr.date);
     });
+    // 也用持仓的买入日期作为种子
+    if(h.date) seedDates.add(h.date);
   });
-  if(!seedDates.size && data[0] && data[0].date) seedDates.add(data[0].date);
   if(!seedDates.size) return;
   // 按日期排序，逐日推算市值和成本
   const sortedDates=[...seedDates].sort();
@@ -2491,6 +2492,8 @@ function seedHistoricalSnapshots(){
       ensureTrades(h);
       const fx=num(h.fx)||1;
       let dayShares=0, dayCostBasis=0;
+      // 如果 h.date 为空，ensureTrades 用 todayKey() 填充，导致历史种子日期无法计算
+      const hasValidBuyDate=!!h.date;
       h.trades.forEach(tr=>{
         const td=tr.date?new Date(tr.date+'T00:00:00'):null;
         if(td&&isNaN(td))return;
@@ -2503,6 +2506,11 @@ function seedHistoricalSnapshots(){
           if(dayShares<0)dayShares=0;if(dayCostBasis<0)dayCostBasis=0;
         }
       });
+      // 如果没有有效买入日期且当天没有交易数据，视为从earliest就持有
+      if(!hasValidBuyDate && dayShares<=0){
+        dayShares=num(h.shares);
+        dayCostBasis=num(h.shares)*num(h.cost);
+      }
       if(dayShares<=0) return;
       cost+=dayCostBasis*fx;
       value+=dayShares*num(h.cost)*fx; // 种子快照按成本价估值
@@ -2530,19 +2538,27 @@ function buildTrendSeries(){
   const snapMap={};
   snapArr.forEach(s=>{snapMap[s.date]={value:s.value,cost:s.cost};});
 
-  // 找最早日期：考虑交易记录
+  // 找最早日期：考虑交易记录和持仓日期
   let earliest=null;
   data.forEach(h=>{
     ensureTrades(h);
+    // 优先使用 h.date（买入日期），而不是 ensureTrades 生成的今日日期
+    if(h.date){
+      const d=new Date(h.date+'T00:00:00');
+      if(!isNaN(d)&&(!earliest||d<earliest))earliest=d;
+    }
     h.trades.forEach(t=>{
       if(t.date){
         const d=new Date(t.date+'T00:00:00');
-        if(!isNaN(d)&&(!earliest||d<earliest))earliest=d;
+        // 只考虑今天之前的交易日期（避免 ensureTrades 用 todayKey 填充的日期）
+        if(!isNaN(d)&&d<today&&(!earliest||d<earliest))earliest=d;
       }
     });
-    if(h.date){const d=new Date(h.date+'T00:00:00');if(!isNaN(d)&&(!earliest||d<earliest))earliest=d;}
   });
-  if(!earliest) earliest=new Date(today.getTime()-30*86400000);
+  // 如果没有有效的历史日期，或者日期太近（只有ensureTrades填充的今天），回溯90天
+  if(!earliest||(today.getTime()-earliest.getTime())<7*86400000){
+    earliest=new Date(today.getTime()-90*86400000);
+  }
   const minDate=new Date(today.getTime()-5*365*86400000);
   if(earliest<minDate) earliest=minDate;
 
@@ -2568,6 +2584,10 @@ function buildTrendSeries(){
 
       // 计算当日持有份额和累计成本（含手续费）
       let dayShares=0, dayCostBasis=0;
+      // 如果 h.date 为空，ensureTrades 用 todayKey() 填充了今天日期的 trade，
+      // 导致所有历史日期都无法计算该持仓。此时用持仓当前数据作为回退。
+      const hasValidBuyDate=!!h.date;
+
       h.trades.forEach(tr=>{
         const td=tr.date?new Date(tr.date+'T00:00:00'):null;
         if(td&&isNaN(td))return;
@@ -2585,6 +2605,11 @@ function buildTrendSeries(){
           if(dayCostBasis<0)dayCostBasis=0;
         }
       });
+      // 如果没有有效买入日期且当天没有交易数据，视为从earliest就持有
+      if(!hasValidBuyDate && dayShares<=0){
+        dayShares=num(h.shares);
+        dayCostBasis=num(h.shares)*num(h.cost);
+      }
       if(dayShares<=0)return; // 当日未持有
 
       const avgCostPx=dayCostBasis/dayShares;
@@ -2617,14 +2642,40 @@ function buildTrendSeries(){
   return series;
 }
 
+let _seedDone=false; // 避免重复seed
 function renderTrend(){
-  if(!document.getElementById('viewTrend').classList.contains('active'))return;
+  // 不再检查active——确保切换tab时一定能渲染
+  // 先确保有快照数据（仅首次）
+  if(data.length && !_seedDone){
+    seedHistoricalSnapshots();
+    ensureDailySnapshot();
+    _seedDone=true;
+  }
   let arr=buildTrendSeries();
+  console.log('[Trend] data.length=', data.length, 'series=', arr.length, 'trRange=', trRange);
   if(trRange>0){const cutoff=Date.now()-trRange*86400000;arr=arr.filter(x=>new Date(x.date+'T00:00:00').getTime()>=cutoff);}
+  console.log('[Trend] after filter:', arr.length, arr.length>0 ? 'first='+arr[0].date+' last='+arr[arr.length-1].date : '');
   const empty=document.getElementById('trEmpty');
   const svg=document.getElementById('trChart');
   const stats=document.getElementById('trStats');
-  if(arr.length<2){empty.style.display='block';svg.style.display='none';stats.innerHTML='';return;}
+  if(!data.length){
+    empty.style.display='block';svg.style.display='none';stats.innerHTML='';
+    empty.innerHTML='还没有可用的趋势数据<br><b>请先导入持仓数据（支持xlsx格式），或手动添加至少一条有购买日期的持仓</b><br>导入后会自动从交易记录生成历史走势，无需每天手动记录<br><button class="btn" style="margin-top:12px" onclick="document.getElementById(\'importInput\').click()">📥 导入数据</button>';
+    return;
+  }
+  if(arr.length<2){
+    empty.style.display='block';svg.style.display='none';stats.innerHTML='';
+    // 提供更具体的提示
+    const hasDate=data.some(h=>h.date||h.trades?.some(t=>t.date));
+    if(!hasDate){
+      empty.innerHTML='趋势数据需要持仓包含<b>购买日期</b><br>请编辑持仓，填写「买入日期」字段<br><button class="btn" style="margin-top:12px" onclick="switchView(\'viewList\')">返回持仓列表</button>';
+    } else if(trRange>0){
+      empty.innerHTML='近'+trRange+'天内没有持仓变动数据<br>试试切换到更长时间范围<br><button class="btn" style="margin-top:12px" onclick="setTrRange(0)">查看全部</button>';
+    } else {
+      empty.innerHTML='趋势数据点不足（需要至少2个）<br>请确认持仓有有效的买入日期<br><button class="btn" style="margin-top:12px" onclick="switchView(\'viewList\')">返回持仓列表</button>';
+    }
+    return;
+  }
   empty.style.display='none';svg.style.display='block';
   const W=800,H=280,PAD={l:64,r:20,t:20,b:30};
   const ys=arr.map(x=>x.value), cs=arr.map(x=>x.cost);
