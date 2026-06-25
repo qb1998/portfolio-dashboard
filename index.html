@@ -1915,6 +1915,7 @@ function commitImport(out){
     for(var _ci=0;_ci<out.length;_ci++){var h=out[_ci];if(h.acct){var found=false;for(var _ai=0;_ai<customAccts.length;_ai++){if(customAccts[_ai]===h.acct){found=true;break;}}if(!found)customAccts.push(h.acct);}}
     saveAccts();
     _seedDone=false;
+    saveSnapshots([]); // 清空旧快照，确保用新逻辑重新生成
     seedHistoricalSnapshots();
     ensureDailySnapshot();
     render();fetchFxRates();setTimeout(function(){refreshQuotes(false);},400);
