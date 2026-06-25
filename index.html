@@ -1912,11 +1912,12 @@ function commitImport(out){
   if(!out.length){alert('未解析到有效数据。请确认表格列顺序与模板一致');return;}
   if(confirm('导入 '+out.length+' 条持仓？将【替换】当前所有数据。')){
     data=out;acctFilter='全部';
-    out.forEach(h=>{if(h.acct&&!customAccts.includes(h.acct))customAccts.push(h.acct);});saveAccts();
-    _seedDone=false; // 重置：新数据导入后需要重新生成种子快照
-    seedHistoricalSnapshots(); // 立即从交易历史生成快照
-    ensureDailySnapshot();     // 记录今日快照
-    render();fetchFxRates();setTimeout(()=>refreshQuotes(false),400);
+    for(var _ci=0;_ci<out.length;_ci++){var h=out[_ci];if(h.acct){var found=false;for(var _ai=0;_ai<customAccts.length;_ai++){if(customAccts[_ai]===h.acct){found=true;break;}}if(!found)customAccts.push(h.acct);}}
+    saveAccts();
+    _seedDone=false;
+    seedHistoricalSnapshots();
+    ensureDailySnapshot();
+    render();fetchFxRates();setTimeout(function(){refreshQuotes(false);},400);
     toast('已导入 '+out.length+' 条持仓');
   }
 }
@@ -2497,18 +2498,18 @@ function drawOvDonut(parts,total){
 /* ----- 收益趋势：快照 + 交易感知的插值 ----- */
 function loadSnapshots(){try{const r=localStorage.getItem(SNAP_KEY);if(r)return JSON.parse(r);}catch(e){}return [];}
 function saveSnapshots(arr){localStorage.setItem(SNAP_KEY,JSON.stringify(arr));}
-function todayKey(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function todayKey(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function dayKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 
 function ensureDailySnapshot(){
-  const arr=loadSnapshots();
-  const tk=todayKey();
+  var arr=loadSnapshots();
+  var tk=todayKey();
   if(!data.length)return arr;
-  const total=data.reduce((s,h)=>s+compute(h).value,0);
-  const cost=data.reduce((s,h)=>s+compute(h).cost,0);
-  const last=arr[arr.length-1];
+  var total=0, cost=0;
+  for(var _ei=0;_ei<data.length;_ei++){var c=compute(data[_ei]);total+=c.value;cost+=c.cost;}
+  var last=arr[arr.length-1];
   if(last&&last.date===tk){last.value=total;last.cost=cost;}
-  else arr.push({date:tk,value:total,cost});
+  else arr.push({date:tk,value:total,cost:cost});
   saveSnapshots(arr);return arr;
 }
 
@@ -2585,50 +2586,52 @@ function seedHistoricalSnapshots(){
 function snapshotNow(){ensureDailySnapshot();renderTrend();toast('已记录当前快照');}
 function clearSnapshots(){if(confirm('清空所有历史快照？此操作不可恢复（不影响持仓数据）。')){saveSnapshots([]);renderTrend();}}
 function setTrRange(d){trRange=d;
-  document.querySelectorAll('#trRangeSeg .chip').forEach((c,i)=>c.classList.toggle('active',[7,30,90,365,0][i]===d));
+  var chips=document.querySelectorAll('#trRangeSeg .chip');
+  for(var _ci=0;_ci<chips.length;_ci++)chips[_ci].classList.toggle('active',[7,30,90,365,0][_ci]===d);
   renderTrend();
 }
 
 // 核心：根据持仓+交易历史+快照，反推每日市值/成本曲线
+// 注意：整个函数链必须用 var 声明，避免 Safari TDZ 错误
 function buildTrendSeries(){
   if(!data.length)return [];
-  const today=new Date(); today.setHours(0,0,0,0);
+  var today=new Date(); today.setHours(0,0,0,0);
 
   // 加载快照（真实数据点）
-  const snapArr=loadSnapshots();
-  const snapMap={};
-  snapArr.forEach(s=>{snapMap[s.date]={value:s.value,cost:s.cost};});
+  var snapArr=loadSnapshots();
+  var snapMap={};
+  for(var _si=0;_si<snapArr.length;_si++){var s=snapArr[_si];snapMap[s.date]={value:s.value,cost:s.cost};}
 
   // 找最早日期：考虑交易记录和持仓日期
-  let earliest=null;
-  data.forEach(h=>{
+  var earliest=null;
+  for(var _hi=0;_hi<data.length;_hi++){
+    var h=data[_hi];
     ensureTrades(h);
-    // 优先使用 h.date（买入日期），而不是 ensureTrades 生成的今日日期
     if(h.date){
-      const d=new Date(h.date+'T00:00:00');
+      var d=new Date(h.date+'T00:00:00');
       if(!isNaN(d)&&(!earliest||d<earliest))earliest=d;
     }
-    h.trades.forEach(t=>{
+    for(var _ti=0;_ti<h.trades.length;_ti++){
+      var t=h.trades[_ti];
       if(t.date){
-        const d=new Date(t.date+'T00:00:00');
-        // 只考虑今天之前的交易日期（避免 ensureTrades 用 todayKey 填充的日期）
-        if(!isNaN(d)&&d<today&&(!earliest||d<earliest))earliest=d;
+        var td=new Date(t.date+'T00:00:00');
+        if(!isNaN(td)&&td<today&&(!earliest||td<earliest))earliest=td;
       }
-    });
-  });
-  // 如果没有有效的历史日期，或者日期太近（只有ensureTrades填充的今天），回溯90天
+    }
+  }
+  // 如果没有有效的历史日期，回溯90天
   if(!earliest||(today.getTime()-earliest.getTime())<7*86400000){
     earliest=new Date(today.getTime()-90*86400000);
   }
-  const minDate=new Date(today.getTime()-5*365*86400000);
+  var minDate=new Date(today.getTime()-5*365*86400000);
   if(earliest<minDate) earliest=minDate;
 
-  const series=[];
-  const dayMs=86400000;
+  var series=[];
+  var dayMs=86400000;
 
-  for(let t=earliest.getTime();t<=today.getTime();t+=dayMs){
-    const d=new Date(t);
-    const k=dayKey(d);
+  for(var t=earliest.getTime();t<=today.getTime();t+=dayMs){
+    var d=new Date(t);
+    var k=dayKey(d);
 
     // 如果有真实快照，优先使用
     if(snapMap[k]){
@@ -2637,166 +2640,172 @@ function buildTrendSeries(){
     }
 
     // 否则基于交易记录插值
-    let value=0, cost=0;
-    data.forEach(h=>{
-      ensureTrades(h);
-      const fx=num(h.fx)||1;
-      const curPx=num(h.price);
+    var value=0, cost=0;
+    for(var _hi2=0;_hi2<data.length;_hi2++){
+      var h2=data[_hi2];
+      ensureTrades(h2);
+      var fx=num(h2.fx)||1;
+      var curPx=num(h2.price);
 
-      // 计算当日持有份额和累计成本（含手续费）
-      let dayShares=0, dayCostBasis=0;
-      // 如果 h.date 为空，ensureTrades 用 todayKey() 填充了今天日期的 trade，
-      // 导致所有历史日期都无法计算该持仓。此时用持仓当前数据作为回退。
-      const hasValidBuyDate=!!h.date;
+      var dayShares=0, dayCostBasis=0;
+      var hasValidBuyDate=!!h2.date;
 
-      h.trades.forEach(tr=>{
-        const td=tr.date?new Date(tr.date+'T00:00:00'):null;
-        if(td&&isNaN(td))return;
-        const tradeTime=td?td.getTime():0;
-        if(tradeTime>t)return; // 交易还没发生
+      for(var _ti2=0;_ti2<h2.trades.length;_ti2++){
+        var tr=h2.trades[_ti2];
+        var trd=tr.date?new Date(tr.date+'T00:00:00'):null;
+        if(trd&&isNaN(trd))continue;
+        var tradeTime=trd?trd.getTime():0;
+        if(tradeTime>t)continue;
         if(tr.type==='buy'){
           dayShares+=num(tr.shares);
-          dayCostBasis+=num(tr.shares)*num(tr.price)+num(tr.fee); // 手续费纳入成本
+          dayCostBasis+=num(tr.shares)*num(tr.price)+num(tr.fee||0);
         }else if(tr.type==='sell'){
-          // 减持：按当前均价减少成本基础（不是按卖出价）
-          const curAvg=dayShares>0?dayCostBasis/dayShares:0;
+          var ca=dayShares>0?dayCostBasis/dayShares:0;
           dayShares-=num(tr.shares);
-          dayCostBasis-=num(tr.shares)*curAvg;
+          dayCostBasis-=num(tr.shares)*ca;
           if(dayShares<0)dayShares=0;
           if(dayCostBasis<0)dayCostBasis=0;
         }
-      });
-      // 如果没有有效买入日期且当天没有交易数据，视为从earliest就持有
-      if(!hasValidBuyDate && dayShares<=0){
-        dayShares=num(h.shares);
-        dayCostBasis=num(h.shares)*num(h.cost);
       }
-      if(dayShares<=0)return; // 当日未持有
+      // 没有有效买入日期时，视为从earliest就持有当前份额
+      if(!hasValidBuyDate && dayShares<=0){
+        dayShares=num(h2.shares);
+        dayCostBasis=num(h2.shares)*num(h2.cost);
+      }
+      if(dayShares<=0) continue;
 
-      const avgCostPx=dayCostBasis/dayShares;
+      var avgCostPx=dayCostBasis/dayShares;
       cost+=dayCostBasis*fx;
 
-      // 插值估算当日价格：找该持仓的最早买入日
-      let firstBuyDate=null;
-      h.trades.forEach(tr=>{
-        if(tr.type==='buy'&&tr.date){
-          const bd=new Date(tr.date+'T00:00:00');
+      // 插值估算当日价格
+      var firstBuyDate=null;
+      for(var _ti3=0;_ti3<h2.trades.length;_ti3++){
+        var tr3=h2.trades[_ti3];
+        if(tr3.type==='buy'&&tr3.date){
+          var bd=new Date(tr3.date+'T00:00:00');
           if(!isNaN(bd)&&(!firstBuyDate||bd<firstBuyDate))firstBuyDate=bd;
         }
-      });
+      }
 
-      let px=avgCostPx;
+      var px=avgCostPx;
       if(firstBuyDate&&curPx){
-        const span=today.getTime()-firstBuyDate.getTime();
+        var span=today.getTime()-firstBuyDate.getTime();
         if(span<=0)px=curPx;
         else{
-          const ratio=(t-firstBuyDate.getTime())/span;
+          var ratio=(t-firstBuyDate.getTime())/span;
           px=avgCostPx+(curPx-avgCostPx)*Math.max(0,Math.min(1,ratio));
         }
       }else if(curPx){
         px=curPx;
       }
       value+=dayShares*px*fx;
-    });
-    series.push({date:k,value,cost,actual:false});
+    }
+    series.push({date:k,value:value,cost:cost,actual:false});
   }
+  console.log('[buildTrendSeries] generated '+series.length+' points, earliest='+dayKey(earliest));
   return series;
 }
 
-let _seedDone=false;
+var _seedDone=false;
 function renderTrend(){
-  // 每次渲染都更新今日快照（价格可能刚刷新）
   if(data.length) ensureDailySnapshot();
-  // 仅在首次或数据变化后重新生成种子快照
   if(data.length && !_seedDone){
     seedHistoricalSnapshots();
-    ensureDailySnapshot(); // 再次更新（seed后可能有新快照）
+    ensureDailySnapshot();
     _seedDone=true;
   }
-  let arr=buildTrendSeries();
+  var arr=buildTrendSeries();
   console.log('[Trend] data.length=', data.length, 'series=', arr.length, 'trRange=', trRange);
-  if(trRange>0){const cutoff=Date.now()-trRange*86400000;arr=arr.filter(x=>new Date(x.date+'T00:00:00').getTime()>=cutoff);}
-  console.log('[Trend] after filter:', arr.length, arr.length>0 ? 'first='+arr[0].date+' last='+arr[arr.length-1].date : '');
-  const empty=document.getElementById('trEmpty');
-  const svg=document.getElementById('trChart');
-  const stats=document.getElementById('trStats');
+  if(trRange>0){
+    var cutoff=Date.now()-trRange*86400000;
+    var filtered=[];
+    for(var _fi=0;_fi<arr.length;_fi++){
+      var x=arr[_fi];
+      var xt=new Date(x.date+'T00:00:00').getTime();
+      if(xt>=cutoff) filtered.push(x);
+    }
+    arr=filtered;
+  }
+  console.log('[Trend] after filter:', arr.length);
+  var empty=document.getElementById('trEmpty');
+  var svg=document.getElementById('trChart');
+  var stats=document.getElementById('trStats');
   if(!data.length){
     empty.style.display='block';svg.style.display='none';stats.innerHTML='';
-    empty.innerHTML='还没有可用的趋势数据<br><b>请先导入持仓数据（支持xlsx格式），或手动添加至少一条有购买日期的持仓</b><br>导入后会自动从交易记录生成历史走势，无需每天手动记录<br><button class="btn" style="margin-top:12px" onclick="document.getElementById(\'importInput\').click()">📥 导入数据</button>';
+    empty.innerHTML='还没有可用的趋势数据<br><b>请先导入持仓数据</b><br><button class="btn" style="margin-top:12px" onclick="document.getElementById(\'importInput\').click()">📥 导入数据</button>';
     return;
   }
   if(arr.length<2){
     empty.style.display='block';svg.style.display='none';stats.innerHTML='';
-    // 提供更具体的提示
-    const hasDate=data.some(h=>h.date||h.trades?.some(t=>t.date));
-    if(!hasDate){
-      empty.innerHTML='趋势数据需要持仓包含<b>购买日期</b><br>请编辑持仓，填写「买入日期」字段<br><button class="btn" style="margin-top:12px" onclick="switchView(\'viewList\')">返回持仓列表</button>';
-    } else if(trRange>0){
-      empty.innerHTML='近'+trRange+'天内没有持仓变动数据<br>试试切换到更长时间范围<br><button class="btn" style="margin-top:12px" onclick="setTrRange(0)">查看全部</button>';
-    } else {
-      empty.innerHTML='趋势数据点不足（需要至少2个）<br>请确认持仓有有效的买入日期<br><button class="btn" style="margin-top:12px" onclick="switchView(\'viewList\')">返回持仓列表</button>';
-    }
+    empty.innerHTML='正在生成趋势数据（'+arr.length+'个点）...<br>如果持续空白，请点「立即记录快照」后刷新页面<br><button class="btn" style="margin-top:12px" onclick="snapshotNow()">📸 立即记录快照</button>';
+    console.log('[Trend] WARNING: only '+arr.length+' data points');
     return;
   }
   empty.style.display='none';svg.style.display='block';
-  const W=800,H=280,PAD={l:64,r:20,t:20,b:30};
-  const ys=arr.map(x=>x.value), cs=arr.map(x=>x.cost);
-  // 防御：过滤无效数据
-  const validYs=ys.filter(v=>isFinite(v)&&v>=0);
-  const validCs=cs.filter(v=>isFinite(v)&&v>=0);
+  var W=800,H=280,PAD={l:64,r:20,t:20,b:30};
+  var ys=[], cs=[];
+  for(var _yi=0;_yi<arr.length;_yi++){ys.push(arr[_yi].value);cs.push(arr[_yi].cost);}
+  var validYs=[], validCs=[];
+  for(var _vi=0;_vi<ys.length;_vi++){if(isFinite(ys[_vi])&&ys[_vi]>=0)validYs.push(ys[_vi]);}
+  for(var _vi2=0;_vi2<cs.length;_vi2++){if(isFinite(cs[_vi2])&&cs[_vi2]>=0)validCs.push(cs[_vi2]);}
   if(validYs.length<2){
-    empty.style.display='block';svg.style.display='none';
-    stats.innerHTML='';
+    empty.style.display='block';svg.style.display='none';stats.innerHTML='';
+    console.log('[Trend] validYs length:', validYs.length);
     return;
   }
-  const minY=Math.min(...validYs,...validCs), maxY=Math.max(...validYs,...validCs);
-  // 如果最大最小相同（平线），强制给一个范围
-  const padY=(maxY-minY)>0.01?(maxY-minY)*0.1:(maxY>0?maxY*0.05:1);
-  const yLo=Math.max(0,minY-padY), yHi=maxY+padY;
-  const sx=i=>PAD.l+(W-PAD.l-PAD.r)*(arr.length<=1?0.5:i/(arr.length-1));
-  const sy=v=>PAD.t+(H-PAD.t-PAD.b)*(1-(v-yLo)/(yHi-yLo||1));
-  let grid='';
-  for(let g=0;g<=4;g++){const y=PAD.t+(H-PAD.t-PAD.b)*g/4;const v=yHi-(yHi-yLo)*g/4;
-    grid+=`<line x1="${PAD.l}" y1="${y}" x2="${W-PAD.r}" y2="${y}" stroke="#1e2a40" stroke-width="1"/><text x="${PAD.l-6}" y="${y+4}" fill="#8497b8" font-size="10" text-anchor="end">${v>=10000?fmt(v/10000,1)+'万':fmt(v,0)}</text>`;}
-  const valPath=ys.map((v,i)=>(i===0?'M':'L')+sx(i)+','+sy(v)).join(' ');
-  const valArea=valPath+` L${sx(arr.length-1)},${H-PAD.b} L${sx(0)},${H-PAD.b} Z`;
-  const costPath=cs.map((v,i)=>(i===0?'M':'L')+sx(i)+','+sy(v)).join(' ');
-  const step=Math.max(1,Math.floor(arr.length/6));
-  let xlabels='';
-  for(let i=0;i<arr.length;i+=step){xlabels+=`<text x="${sx(i)}" y="${H-PAD.b+18}" fill="#8497b8" font-size="10" text-anchor="middle">${arr[i].date.slice(5)}</text>`;}
-
-  // 标记真实快照点
-  let snapDots='';
-  arr.forEach((p,i)=>{
+  var minY=Math.min.apply(Math,validYs), maxY=Math.max.apply(Math,validYs);
+  var minC=Math.min.apply(Math,validCs), maxC=Math.max.apply(Math,validCs);
+  if(minC<minY)minY=minC;
+  if(maxC>maxY)maxY=maxC;
+  var padY=(maxY-minY)>0.01?(maxY-minY)*0.1:(maxY>0?maxY*0.05:1);
+  var yLo=Math.max(0,minY-padY), yHi=maxY+padY;
+  function sx(i){return PAD.l+(W-PAD.l-PAD.r)*(arr.length<=1?0.5:i/(arr.length-1));}
+  function sy(v){return PAD.t+(H-PAD.t-PAD.b)*(1-(v-yLo)/(yHi-yLo||1));}
+  var grid='';
+  for(var g=0;g<=4;g++){var gy=PAD.t+(H-PAD.t-PAD.b)*g/4;var gv=yHi-(yHi-yLo)*g/4;
+    grid+='<line x1="'+PAD.l+'" y1="'+gy+'" x2="'+(W-PAD.r)+'" y2="'+gy+'" stroke="#1e2a40" stroke-width="1"/>';
+    grid+='<text x="'+(PAD.l-6)+'" y="'+(gy+4)+'" fill="#8497b8" font-size="10" text-anchor="end">'+(gv>=10000?fmt(gv/10000,1)+'万':fmt(gv,0))+'</text>';}
+  var valPath='', valArea='', costPath='';
+  for(var _pi=0;_pi<ys.length;_pi++){
+    valPath+=(_pi===0?'M':'L')+sx(_pi)+','+sy(ys[_pi]);
+    costPath+=(_pi===0?'M':'L')+sx(_pi)+','+sy(cs[_pi]);
+  }
+  valArea=valPath+' L'+sx(ys.length-1)+','+(H-PAD.b)+' L'+sx(0)+','+(H-PAD.b)+' Z';
+  var step=Math.max(1,Math.floor(arr.length/6));
+  var xlabels='';
+  for(var _xi=0;_xi<arr.length;_xi+=step){xlabels+='<text x="'+sx(_xi)+'" y="'+(H-PAD.b+18)+'" fill="#8497b8" font-size="10" text-anchor="middle">'+arr[_xi].date.slice(5)+'</text>';}
+  var snapDots='';
+  for(var _di=0;_di<arr.length;_di++){
+    var p=arr[_di];
     if(p.actual){
-      snapDots+=`<circle cx="${sx(i)}" cy="${sy(p.value)}" r="3" fill="${lastUp?'#ff5d5d':'#23c08a'}" opacity="0.7"/>`;
+      snapDots+='<circle cx="'+sx(_di)+'" cy="'+sy(p.value)+'" r="3" fill="'+(ys[ys.length-1]>=ys[0]?'#ff5d5d':'#23c08a')+'" opacity="0.7"/>';
     }
-  });
-
-  const lastV=ys[ys.length-1],firstV=ys[0],delta=lastV-firstV,deltaPct=firstV?delta/firstV*100:0;
-  const lastUp=delta>=0;
-  const colorMain=lastUp?'#ff5d5d':'#23c08a';
-  const legend=`<g font-size="11"><rect x="${W-PAD.r-200}" y="${PAD.t}" width="190" height="52" fill="rgba(15,22,36,.7)" rx="6"/><line x1="${W-PAD.r-190}" y1="${PAD.t+13}" x2="${W-PAD.r-170}" y2="${PAD.t+13}" stroke="${colorMain}" stroke-width="2"/><text x="${W-PAD.r-165}" y="${PAD.t+16}" fill="#dfe7f5">总市值（快照+插值）</text><line x1="${W-PAD.r-190}" y1="${PAD.t+30}" x2="${W-PAD.r-170}" y2="${PAD.t+30}" stroke="#8497b8" stroke-width="1.5" stroke-dasharray="4 3"/><text x="${W-PAD.r-165}" y="${PAD.t+33}" fill="#dfe7f5">累计成本</text><circle cx="${W-PAD.r-180}" cy="${PAD.t+47}" r="3" fill="${colorMain}" opacity="0.7"/><text x="${W-PAD.r-165}" y="${PAD.t+50}" fill="#dfe7f5">真实快照</text></g>`;
-  svg.innerHTML=`<defs><linearGradient id="trFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${colorMain}" stop-opacity="0.32"/><stop offset="100%" stop-color="${colorMain}" stop-opacity="0"/></linearGradient></defs>${grid}<path d="${valArea}" fill="url(#trFill)"/><path d="${costPath}" fill="none" stroke="#8497b8" stroke-width="1.5" stroke-dasharray="4 3"/><path d="${valPath}" fill="none" stroke="${colorMain}" stroke-width="2"/>${snapDots}<circle cx="${sx(arr.length-1)}" cy="${sy(lastV)}" r="4" fill="${colorMain}"/>${xlabels}${legend}`;
-  const peakV=Math.max(...ys),troughV=Math.min(...ys);
-  let maxDD=0,peak=ys[0];
-  ys.forEach(v=>{if(v>peak)peak=v;const dd=peak?(v-peak)/peak*100:0;if(dd<maxDD)maxDD=dd;});
-  const lastCost=cs[cs.length-1]||0;
-  const totalPnl=lastV-lastCost;
-  const totalRealized=data.reduce((s,h)=>s+calcRealizedPnl(h),0);
-  const allPnl=totalPnl+totalRealized;
-  stats.innerHTML=`
-    <div class="tr-stat"><div class="lbl">最新市值</div><div class="val ${cls(delta)}">¥${fmt(lastV,0)}<br><span style="font-size:11px">${sign(delta)}¥${fmt(delta,0)} · ${sign(deltaPct)}${fmt(deltaPct,2)}%</span></div></div>
-    <div class="tr-stat"><div class="lbl">累计成本</div><div class="val">¥${fmt(lastCost,0)}<br><span style="font-size:11px;color:var(--txt-dim)">已建仓部分合计</span></div></div>
-    <div class="tr-stat"><div class="lbl">累计收益</div><div class="val ${cls(allPnl)}">${sign(allPnl)}¥${fmt(allPnl,0)}<br><span style="font-size:11px">浮盈${sign(totalPnl)}¥${fmt(totalPnl,0)} + 已实现${sign(totalRealized)}¥${fmt(totalRealized,0)}</span></div></div>
-    <div class="tr-stat"><div class="lbl">最大回撤</div><div class="val down">${fmt(maxDD,2)}%<br><span style="font-size:11px;color:var(--txt-dim)">区间高点回撤</span></div></div>`;
+  }
+  var lastV=ys[ys.length-1],firstV=ys[0],delta=lastV-firstV,deltaPct=firstV?delta/firstV*100:0;
+  var lastUp=delta>=0;
+  var colorMain=lastUp?'#ff5d5d':'#23c08a';
+  var legend='<g font-size="11"><rect x="'+(W-PAD.r-200)+'" y="'+PAD.t+'" width="190" height="52" fill="rgba(15,22,36,.7)" rx="6"/><line x="'+(W-PAD.r-190)+'" y="'+(PAD.t+13)+'" x2="'+(W-PAD.r-170)+'" y2="'+(PAD.t+13)+'" stroke="'+colorMain+'" stroke-width="2"/><text x="'+(W-PAD.r-165)+'" y="'+(PAD.t+16)+'" fill="#dfe7f5">总市值（快照+插值）</text><line x="'+(W-PAD.r-190)+'" y="'+(PAD.t+30)+'" x2="'+(W-PAD.r-170)+'" y2="'+(PAD.t+30)+'" stroke="#8497b8" stroke-width="1.5" stroke-dasharray="4 3"/><text x="'+(W-PAD.r-165)+'" y="'+(PAD.t+33)+'" fill="#dfe7f5">累计成本</text><circle cx="'+(W-PAD.r-180)+'" cy="'+(PAD.t+47)+'" r="3" fill="'+colorMain+'" opacity="0.7"/><text x="'+(W-PAD.r-165)+'" y="'+(PAD.t+50)+'" fill="#dfe7f5">真实快照</text></g>';
+  svg.innerHTML='<defs><linearGradient id="trFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="'+colorMain+'" stop-opacity="0.32"/><stop offset="100%" stop-color="'+colorMain+'" stop-opacity="0"/></linearGradient></defs>'+grid+'<path d="'+valArea+'" fill="url(#trFill)"/><path d="'+costPath+'" fill="none" stroke="#8497b8" stroke-width="1.5" stroke-dasharray="4 3"/><path d="'+valPath+'" fill="none" stroke="'+colorMain+'" stroke-width="2"/>'+snapDots+'<circle cx="'+sx(arr.length-1)+'" cy="'+sy(lastV)+'" r="4" fill="'+colorMain+'"/>'+xlabels+legend;
+  var peakV=ys[0], troughV=ys[0];
+  for(var _yi2=1;_yi2<ys.length;_yi2++){if(ys[_yi2]>peakV)peakV=ys[_yi2];if(ys[_yi2]<troughV)troughV=ys[_yi2];}
+  var maxDD=0,peak=ys[0];
+  for(var _ddi=0;_ddi<ys.length;_ddi++){var v=ys[_ddi];if(v>peak)peak=v;var dd=peak?(v-peak)/peak*100:0;if(dd<maxDD)maxDD=dd;}
+  var lastCost=cs[cs.length-1]||0;
+  var totalPnl=lastV-lastCost;
+  var totalRealized=0;
+  for(var _ri=0;_ri<data.length;_ri++)totalRealized+=calcRealizedPnl(data[_ri]);
+  var allPnl=totalPnl+totalRealized;
+  stats.innerHTML=
+    '<div class="tr-stat"><div class="lbl">最新市值</div><div class="val '+cls(delta)+'">¥'+fmt(lastV,0)+'<br><span style="font-size:11px">'+sign(delta)+'¥'+fmt(delta,0)+' · '+sign(deltaPct)+fmt(deltaPct,2)+'%</span></div></div>'+
+    '<div class="tr-stat"><div class="lbl">累计成本</div><div class="val">¥'+fmt(lastCost,0)+'<br><span style="font-size:11px;color:var(--txt-dim)">已建仓部分合计</span></div></div>'+
+    '<div class="tr-stat"><div class="lbl">累计收益</div><div class="val '+cls(allPnl)+'">'+sign(allPnl)+'¥'+fmt(allPnl,0)+'<br><span style="font-size:11px">浮盈'+sign(totalPnl)+'¥'+fmt(totalPnl,0)+' + 已实现'+sign(totalRealized)+'¥'+fmt(totalRealized,0)+'</span></div></div>'+
+    '<div class="tr-stat"><div class="lbl">最大回撤</div><div class="val down">'+fmt(maxDD,2)+'%<br><span style="font-size:11px;color:var(--txt-dim)">区间高点回撤</span></div></div>';
 }
-
 render();
 if(data.length) seedHistoricalSnapshots(); // 有数据时自动补齐历史种子快照
 fetchFxRates();
 ensureDailySnapshot();
-setTimeout(()=>refreshQuotes(false),600);
+setTimeout(function(){refreshQuotes(false);},600);
 </script>
 </body>
 </html>
