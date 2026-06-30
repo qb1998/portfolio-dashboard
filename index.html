@@ -448,7 +448,7 @@
     <div class="body">
       <div class="field">
         <label>产品名称 / 代码搜索 *</label>
-        <input id="f_name" placeholder="输入名称或代码，如 富国全球 / 100055 / 腾讯" autocomplete="off" oninput="onSearchInput()" onfocus="onSearchInput()">
+        <input id="f_name" placeholder="输入名称或代码，如 富国全球 / 100055 / 腾讯" autocomplete="off" oninput="onSearchInput();updateProxyField();" onfocus="onSearchInput()">
         <div class="sugbox" id="sugbox"></div>
         <div class="tip">支持基金/股票联想，选中后自动填代码与类型；也可手动改。</div>
       </div>
@@ -479,7 +479,7 @@
       </div>
       <div class="field">
         <label id="f_code_label">行情代码（基金填6位代码 / 股票填 sh600519、hk00700、usAAPL）</label>
-        <input id="f_code" placeholder="如 100055 / sh600519 / hk00700 / usAAPL">
+        <input id="f_code" placeholder="如 100055 / sh600519 / hk00700 / usAAPL" oninput="updateProxyField()">
         <div class="tip">填对代码后可自动更新现价与当日涨跌幅；不填或取不到则手动维护。</div>
       </div>
       <div class="field-row three">
@@ -515,6 +515,16 @@
         <div class="field">
           <label>对人民币汇率</label>
           <input id="f_fx" type="number" step="any" value="1" placeholder="人民币填1">
+        </div>
+        <div class="field" id="proxyWrap" style="display:none">
+          <label>代理代码 <span style="font-weight:normal;color:var(--gold);font-size:11px">QDII/港股互认基金白天估值</span></label>
+          <input id="f_proxy" placeholder="如 usQQQ / usSPY / usBABA（QDII 关联 ETF/股票）">
+          <div class="tip" style="color:var(--txt-dim)">用同向 ETF 估算当日波动。如富国全球科技→usQQQ；标普500→usSPY；纳斯达克100→usQQQ。</div>
+        </div>
+        <div class="field" id="annualWrap" style="display:none">
+          <label>7 日年化 % <span style="font-weight:normal;color:var(--gold);font-size:11px">银行理财自动估算日收益</span></label>
+          <input id="f_annual" type="number" step="any" placeholder="如 2.85（理财页面查最新值）">
+          <div class="tip" style="color:var(--txt-dim)">填入后自动按 年化÷365 估算日涨跌幅；刷新时不会变（需手动更新）。</div>
         </div>
       </div>
     </div>
@@ -763,9 +773,16 @@ function cls(n){return n>0?'up':(n<0?'down':'');}
 function sign(n){return n>0?'+':'';}
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
 function curShort(c){return (c||'CNY').split(' ')[0];}
-function isOffshore(h){return /^[A-Za-z]{2}\d{8,}$/.test((h.code||'').trim());}
-function canQuote(h){return h.code&&!isOffshore(h)&&(h.type==='基金'||h.type==='股票'||h.type==='ETF');}
-function isQDII(h){return /QDII/i.test(h.name||'')||/QDII/i.test(h.code||'');}
+function isOffshore(h){return /^[A-Za-z]{2}\d{8,}$/.test((h.code||'').trim())&&!/QDII|全球|环球|海外|互认/i.test(h.name||'');}
+function canQuote(h){
+  if(!h.code)return false;
+  if(h.type==='基金'||h.type==='股票'||h.type==='ETF'){
+    if(isOffshore(h))return false;
+    return true;
+  }
+  return false;
+}
+function isQDII(h){return /QDII|全球|环球|海外|互认|港股通|全球科技|纳斯达克|标普|美股|港股|亚太/i.test(h.name||'');}
 function moneyCNY(cny){return '¥'+fmt(cny,2);}
 
 /* 确保 holding 有 trades 数组（向后兼容） */
@@ -1036,25 +1053,88 @@ function setBusy(on){
 let pending=0, manualFlag=false, quoteGuard=null, quoteDone=false;
 
 window.jsonpgz=function(d){
-  if(!d||!d.fundcode)return;
-  // 用 filter 找所有同代码持仓（同一基金可能有多笔买入记录）
-  const matches=data.filter(x=>x.code===d.fundcode);
+  if(!d||!d.fundcode){
+    // 基金代码未找到（QDII/港股互认基金常见）：尝试走代理 ETF 估值
+    var failMatches=data.filter(x=>!x._q&&x.code&&(isQDII(x)||/^HK\d{8}$/i.test(x.code||'')));
+    if(failMatches.length>0){
+      failMatches.forEach(h=>fetchProxyForFund(h));
+    }else{
+      dec();
+    }
+    return;
+  }
+  var matches=data.filter(x=>x.code===d.fundcode&&!x._q);
+  var hasMatch=matches.length>0;
   matches.forEach(h=>{
     if(h){
       if(d.gsz) h.price=num(d.gsz);
       if(d.gszzl) h.day=num(d.gszzl);
-      h.upd=(d.gztime||'').replace(/^\d{4}-/,'')+(isQDII(h)?'(收盘)':'');
+      h.upd=(d.gztime||'').replace(/^\d{4}-/,'')+(isQDII(h)?'(QDII收盘)':'');
       h._q=true;
     }
   });
-  dec();
+  if(!hasMatch){dec();return;}
 };
 function fetchFund(h){
   pending++;
-  const s=document.createElement('script');
+  // 港股互认基金（HK + 8位数字）：天天基金 API 不支持，直接走代理 ETF
+  if(/^HK\d{8}$/i.test(h.code||'')){
+    h._isHKMF=true;
+    pending--; // 抵消上面的 +1，让 fetchProxyForFund 自己计数
+    fetchProxyForFund(h);
+    return;
+  }
+  var s=document.createElement('script');
   s.src='https://fundgz.1234567.com.cn/js/'+encodeURIComponent(h.code)+'.js?rt='+Date.now();
-  s.onerror=()=>{dec();s.remove();};
+  s.onerror=()=>{pending--;fetchProxyForFund(h);s.remove();}; // 失败时 +1 再 -1，让 fetchProxyForFund 自己计数
   s.onload=()=>{s.remove();};
+  document.body.appendChild(s);
+}
+function fetchProxyForFund(h){
+  var proxy=h.proxy||'';
+  if(!proxy){
+    // 无代理：尝试股票 API 直接拉（港股基金代码有时能拿到）
+    if(h.code&&/^[A-Za-z]{2}\d{5,}$/.test(h.code)){
+      fetchStock(h);
+    }else{
+      dec();
+    }
+    return;
+  }
+  // 有代理：调股票 API 拿代理 ETF 实时价
+  var pCode=normCode(proxy);
+  var prevPrice=num(h.price);
+  var prevCost=num(h.cost);
+  var _cb='__proxy_'+Date.now()+'_'+Math.floor(Math.random()*1e6);
+  window[_cb]=function(v){
+    try{
+      if(v&&v.indexOf('none_match')<0){
+        var a=v.split('~');
+        var cur=parseFloat(a[3]);
+        var prev=parseFloat(a[4]);
+        if(cur>0){
+          if(prevPrice>0&&prev>0){
+            // 估算基金价 = 昨收基金价 × (代理今价/代理昨价)  → 偏差小但能反映当日波动
+            h.price=prevPrice*(cur/prev);
+          }else{
+            // 第一次：用代理价本身作为参考（用户后续可校准）
+            h.price=cur*(prevCost>0?prevCost/prev:1);
+          }
+          if(prev>0)h.day=(cur/prev-1)*100;
+          h.upd=cur.toFixed(2)+' (代理 '+esc(proxy)+')';
+          h._q=true;
+          h._src='proxy';
+        }
+      }
+    }catch(e){}
+    try{delete window[_cb];}catch(e){}
+    dec();
+  };
+  var s=document.createElement('script');
+  s.charset='GBK';
+  s.src='https://qt.gtimg.cn/q='+encodeURIComponent(pCode)+'&r='+Date.now();
+  s.onload=function(){try{var v=window['v_'+pCode];if(v)window[_cb](v);else dec();}catch(e){dec();}s.remove();};
+  s.onerror=function(){try{delete window[_cb];}catch(e){}dec();s.remove();};
   document.body.appendChild(s);
 }
 function normCode(raw){
@@ -1233,12 +1313,23 @@ document.addEventListener('click',e=>{
 
 /* ============ 弹窗 ============ */
 function onTypeChange(){
-  const t=document.getElementById('f_type').value;
-  const lbl=document.getElementById('f_code_label');
-  const qb=document.getElementById('quoteBtn');
+  var t=document.getElementById('f_type').value;
+  var lbl=document.getElementById('f_code_label');
+  var qb=document.getElementById('quoteBtn');
   if(t==='基金'){lbl.textContent='基金代码（6位，用于自动取价）';qb.style.visibility='visible';}
   else if(t==='股票'||t==='ETF'){lbl.textContent='行情代码（港股 hk09992 / 沪 sh600519 / 深 sz002385 / 美 usAAPL，填数字会自动补全）';qb.style.visibility='visible';}
   else{lbl.textContent='代码（可选，此类型不支持自动取价）';qb.style.visibility='hidden';}
+  updateProxyField();
+  // 银行理财显示 7 日年化字段
+  var aw=document.getElementById('annualWrap');
+  if(aw)aw.style.display=(t==='债券/理财')?'block':'none';
+}
+function updateProxyField(){
+  var t=document.getElementById('f_type').value;
+  var n=document.getElementById('f_name').value;
+  var c=document.getElementById('f_code').value;
+  var show=(t==='基金')&&(isQDII({name:n,code:c})||/^HK\d{8}$/i.test(c||''));
+  document.getElementById('proxyWrap').style.display=show?'block':'none';
 }
 function onAcctSelect(){
   const v=document.getElementById('f_acct').value;
@@ -1258,7 +1349,7 @@ function fillAcctOptions(selected){
   document.getElementById('acctCustomWrap').style.display='none';
 }
 function openAdd(){editId=null;document.getElementById('modalTitle').textContent='添加持仓';
-  ['f_name','f_code','f_shares','f_cost','f_price','f_day','f_date','f_acct_custom'].forEach(i=>document.getElementById(i).value='');
+  ['f_name','f_code','f_shares','f_cost','f_price','f_day','f_date','f_acct_custom','f_proxy','f_annual'].forEach(i=>{var el=document.getElementById(i);if(el)el.value='';});
   document.getElementById('f_type').selectedIndex=0;
   fillAcctOptions();
   document.getElementById('f_cur').value='CNY';
@@ -1281,6 +1372,8 @@ function openEdit(hid){
   document.getElementById('f_day').value=h.day;
   document.getElementById('f_cur').value=(h.cur in FX_DEFAULT)?h.cur:'CNY';
   document.getElementById('f_fx').value=h.fx||1;
+  document.getElementById('f_proxy').value=h.proxy||'';
+  document.getElementById('f_annual').value=h.annual7||'';
   document.getElementById('sugbox').classList.remove('show');
   onTypeChange();
   document.getElementById('mask').classList.add('show');
@@ -1349,7 +1442,10 @@ function saveHolding(){
     if(!acct){alert('请输入自定义账户名称');return;}
     if(!customAccts.includes(acct)){customAccts.push(acct);saveAccts();}
   }
-  const obj={
+  var proxyEl=document.getElementById('f_proxy');
+  var annualEl=document.getElementById('f_annual');
+  var annual7=annualEl?num(annualEl.value):0;
+  var obj={
     name,code:document.getElementById('f_code').value.trim(),
     type:document.getElementById('f_type').value,
     acct,
@@ -1357,8 +1453,12 @@ function saveHolding(){
     shares:num(shares),cost:num(cost),price:num(price),
     day:num(document.getElementById('f_day').value),
     cur:document.getElementById('f_cur').value,
-    fx:num(document.getElementById('f_fx').value)||1
+    fx:num(document.getElementById('f_fx').value)||1,
+    proxy:proxyEl?proxyEl.value.trim():'',
+    annual7:annual7||0
   };
+  // 银行理财用 7 日年化自动估算当日涨跌幅
+  if(obj.type==='债券/理财'&&obj.annual7>0&&!obj.day){obj.day=obj.annual7/365;}
   if(editId){
     const h=data.find(x=>x.id===editId);
     Object.assign(h,obj);
