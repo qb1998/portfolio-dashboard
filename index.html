@@ -518,7 +518,10 @@
         </div>
         <div class="field" id="proxyWrap" style="display:none">
           <label>代理代码 <span style="font-weight:normal;color:var(--gold);font-size:11px">QDII/港股互认基金白天估值</span></label>
-          <input id="f_proxy" placeholder="如 usQQQ / usSPY / usBABA（QDII 关联 ETF/股票）">
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="f_proxy" placeholder="如 usQQQ / usSPY / usBABA" style="flex:1">
+            <button class="btn" type="button" onclick="doAutoPickProxy()" style="padding:6px 10px;font-size:12px;white-space:nowrap" title="根据基金名关键字自动推荐代理ETF">🪄 自动配</button>
+          </div>
           <div class="tip" style="color:var(--txt-dim)">用同向 ETF 估算当日波动。如富国全球科技→usQQQ；标普500→usSPY；纳斯达克100→usQQQ。</div>
         </div>
         <div class="field" id="annualWrap" style="display:none">
@@ -1054,10 +1057,16 @@ let pending=0, manualFlag=false, quoteGuard=null, quoteDone=false;
 
 window.jsonpgz=function(d){
   if(!d||!d.fundcode){
-    // 基金代码未找到（QDII/港股互认基金常见）：尝试走代理 ETF 估值
-    var failMatches=data.filter(x=>!x._q&&x.code&&(isQDII(x)||/^HK\d{8}$/i.test(x.code||'')));
+    // fundgz 失败：找出所有应该走代理的未取价基金
+    var failMatches=data.filter(x=>!x._q&&x.code&&(isQDII(x)||/^HK\d{6,}$/i.test(x.code||'')));
     if(failMatches.length>0){
-      failMatches.forEach(h=>fetchProxyForFund(h));
+      failMatches.forEach(h=>{
+        if(!h.proxy){
+          var ap=autoPickProxy(h);
+          if(ap){h.proxy=ap;persist();}
+        }
+        fetchProxyForFund(h);
+      });
     }else{
       dec();
     }
@@ -1075,25 +1084,60 @@ window.jsonpgz=function(d){
   });
   if(!hasMatch){dec();return;}
 };
+// 根据 QDII 基金名称自动推荐最相关的代理 ETF/股票
+function autoPickProxy(h){
+  var n=(h.name||'').toLowerCase();
+  if(/纳斯达克|纳指|nasdaq|科技|互联网|qqq|100|科技股/i.test(h.name||''))return 'usQQQ';
+  if(/标普|s&p|500|sp500/i.test(h.name||''))return 'usSPY';
+  if(/中概|中证|chinese|china|kweb|mchi/i.test(h.name||''))return 'usMCHI';
+  if(/恒生|港股|香港|hs|hsi|hk/i.test(h.name||''))return 'hkHSI';
+  if(/德国|欧洲|europea|dax/i.test(h.name||''))return 'usEWG';
+  if(/日本|日经|japan|nikkei|topix/i.test(h.name||''))return 'usEWJ';
+  if(/黄金|gold|大宗商品|商品|commodit/i.test(h.name||''))return 'usGLD';
+  if(/石油|原油|oil|energy/i.test(h.name||''))return 'usUSO';
+  if(/医药|医疗|生物|health|bio|pharma/i.test(h.name||''))return 'usXLV';
+  if(/房地产|reit|reits/i.test(h.name||''))return 'usVNQ';
+  if(/越南|vietnam|印度|india/i.test(h.name||''))return 'usVNM';
+  if(/全球|环球|全指|world|global|acwi/i.test(h.name||''))return 'usVT';
+  // 兜底：任意 QDII 默认用 QQQ（覆盖广度最广）
+  return 'usQQQ';
+}
 function fetchFund(h){
-  pending++;
-  // 港股互认基金（HK + 8位数字）：天天基金 API 不支持，直接走代理 ETF
-  if(/^HK\d{8}$/i.test(h.code||'')){
+  // 港股互认基金（HK+6位以上数字）：fundgz 100% 不支持，直接走代理
+  if(/^HK\d{6,}$/i.test(h.code||'')){
     h._isHKMF=true;
-    pending--; // 抵消上面的 +1，让 fetchProxyForFund 自己计数
+    if(!h.proxy){
+      var ap=autoPickProxy(h);
+      if(ap){h.proxy=ap;persist();}
+    }
     fetchProxyForFund(h);
     return;
   }
+  // QDII 基金如果配了代理：直接用代理拿白天实时估值，跳过 fundgz
+  // （fundgz 只在 22:00 后出当日净值，白天拿到的是昨天的）
+  if(isQDII(h)&&h.proxy){
+    fetchProxyForFund(h);
+    return;
+  }
+  // 6 位 QDII 基金但没配代理：尝试自动配 + 走代理
+  if(isQDII(h)&&!/^HK/.test(h.code||'')&&!h.proxy){
+    var ap2=autoPickProxy(h);
+    if(ap2){h.proxy=ap2;persist();}
+    fetchProxyForFund(h);
+    return;
+  }
+  pending++;
   var s=document.createElement('script');
   s.src='https://fundgz.1234567.com.cn/js/'+encodeURIComponent(h.code)+'.js?rt='+Date.now();
-  s.onerror=()=>{pending--;fetchProxyForFund(h);s.remove();}; // 失败时 +1 再 -1，让 fetchProxyForFund 自己计数
+  s.onerror=()=>{pending--;fetchProxyForFund(h);s.remove();};
   s.onload=()=>{s.remove();};
   document.body.appendChild(s);
 }
 function fetchProxyForFund(h){
   var proxy=h.proxy||'';
   if(!proxy){
-    // 无代理：尝试股票 API 直接拉（港股基金代码有时能拿到）
+    // 无代理：尝试股票 API 直接拉（HK 基金代码有时能拿到港股实时）
+    pending++;
     if(h.code&&/^[A-Za-z]{2}\d{5,}$/.test(h.code)){
       fetchStock(h);
     }else{
@@ -1102,6 +1146,7 @@ function fetchProxyForFund(h){
     return;
   }
   // 有代理：调股票 API 拿代理 ETF 实时价
+  pending++;
   var pCode=normCode(proxy);
   var prevPrice=num(h.price);
   var prevCost=num(h.cost);
@@ -1328,8 +1373,15 @@ function updateProxyField(){
   var t=document.getElementById('f_type').value;
   var n=document.getElementById('f_name').value;
   var c=document.getElementById('f_code').value;
-  var show=(t==='基金')&&(isQDII({name:n,code:c})||/^HK\d{8}$/i.test(c||''));
+  var show=(t==='基金')&&(isQDII({name:n,code:c})||/^HK\d{6,}$/i.test(c||''));
   document.getElementById('proxyWrap').style.display=show?'block':'none';
+}
+function doAutoPickProxy(){
+  var n=document.getElementById('f_name').value;
+  var c=document.getElementById('f_code').value;
+  var ap=autoPickProxy({name:n,code:c});
+  document.getElementById('f_proxy').value=ap;
+  toast('已自动推荐代理：'+ap);
 }
 function onAcctSelect(){
   const v=document.getElementById('f_acct').value;
