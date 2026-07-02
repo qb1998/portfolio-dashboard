@@ -638,7 +638,7 @@ const KEY='holding_dashboard_v2';
 const ACCT_KEY='holding_dashboard_accts';
 const SNAP_KEY='holding_dashboard_snapshots';
 const DATA_VER='holding_dashboard_ver';
-const CUR_VER=3; // 每次更新默认数据时递增
+const CUR_VER=4; // v4: 修复 QDII 代理估值复利 bug（持久化的 _navAnchor 必须清掉）
 let data=load();
 let editId=null;
 let acctFilter='全部';
@@ -762,7 +762,20 @@ const CCY_SYMBOL={CNY:'¥',USD:'$',HKD:'HK$',EUR:'€',JPY:'¥',OTH:'¤'};
 function load(){
   // 仅更新版本号，不清除用户已保存的数据
   localStorage.setItem(DATA_VER,String(CUR_VER));
-  try{const r=localStorage.getItem(KEY);if(r)return JSON.parse(r);}catch(e){}
+  try{
+    const r=localStorage.getItem(KEY);
+    if(r){
+      var arr=JSON.parse(r);
+      // 清理临时运行时标志（_q/_src），但**保留** _navAnchor
+      // _navAnchor 是稳定的"基准净值"（最后一次 fundgz 返回的真实值，或 xlsx 初始值），
+      // 必须跨 session 保留，否则当代理 ETF 与基金真实净值出现跟踪误差时会反复重置基准
+      for(var _li=0;_li<arr.length;_li++){
+        delete arr[_li]._q;
+        delete arr[_li]._src;
+      }
+      return arr;
+    }
+  }catch(e){}
   // 新用户返回空数组，不预填任何数据
   return [];
 }
@@ -1076,12 +1089,26 @@ window.jsonpgz=function(d){
   var hasMatch=matches.length>0;
   matches.forEach(h=>{
     if(h){
-      if(d.gsz) h.price=num(d.gsz);
+      if(d.gsz){
+        h.price=num(d.gsz);
+        h._navAnchor=num(d.gsz);  // fundgz 返回真实净值时建立稳定基准
+      }
       if(d.gszzl) h.day=num(d.gszzl);
       h.upd=(d.gztime||'').replace(/^\d{4}-/,'')+(isQDII(h)?'(QDII收盘)':'');
       h._q=true;
     }
   });
+  // 关键修复：QDII 基金 fundgz 只在 22:00/04:00 出真实净值，白天拿到的是昨天的。
+  // 有代理时再叠一层代理 ETF 当日波动，得到"白天实时估值"。
+  // fetchProxyForFund 会用刚拿到的 _navAnchor 作为基准，**不会**复利。
+  if(hasMatch){
+    matches.forEach(h=>{
+      if(h&&isQDII(h)&&h.proxy){
+        fetchProxyForFund(h);
+      }
+    });
+    return;
+  }
   if(!hasMatch){dec();return;}
 };
 // 根据 QDII 基金名称自动推荐最相关的代理 ETF/股票
@@ -1113,23 +1140,16 @@ function fetchFund(h){
     fetchProxyForFund(h);
     return;
   }
-  // QDII 基金如果配了代理：直接用代理拿白天实时估值，跳过 fundgz
-  // （fundgz 只在 22:00 后出当日净值，白天拿到的是昨天的）
-  if(isQDII(h)&&h.proxy){
-    fetchProxyForFund(h);
-    return;
-  }
-  // 6 位 QDII 基金但没配代理：尝试自动配 + 走代理
-  if(isQDII(h)&&!/^HK/.test(h.code||'')&&!h.proxy){
+  // 其他 6 位基金（含 QDII 如 100055）：先 fundgz 拿真实净值（重置 _navAnchor），
+  // QDII 有代理时 jsonpgz 会再调代理叠加当日波动
+  if(!h.proxy&&isQDII(h)&&!/^HK/.test(h.code||'')){
     var ap2=autoPickProxy(h);
     if(ap2){h.proxy=ap2;persist();}
-    fetchProxyForFund(h);
-    return;
   }
   pending++;
   var s=document.createElement('script');
   s.src='https://fundgz.1234567.com.cn/js/'+encodeURIComponent(h.code)+'.js?rt='+Date.now();
-  s.onerror=()=>{pending--;fetchProxyForFund(h);s.remove();};
+  s.onerror=()=>{pending--;fetchProxyForFund(h);s.remove();}; // fundgz 失败时走代理（QDII 才会到这里）
   s.onload=()=>{s.remove();};
   document.body.appendChild(s);
 }
@@ -1148,7 +1168,11 @@ function fetchProxyForFund(h){
   // 有代理：调股票 API 拿代理 ETF 实时价
   pending++;
   var pCode=normCode(proxy);
-  var prevPrice=num(h.price);
+  // 关键修复：使用稳定的"基准净值"（_navAnchor），而不是 h.price
+  // 防止重复刷新时复利放大同一天的代理涨跌幅
+  // 优先级：fundgz 返回的真实净值 > xlsx 导入时的初始值
+  if(typeof h._navAnchor!=='number'||h._navAnchor<=0)h._navAnchor=num(h.price);
+  var anchor=h._navAnchor;
   var prevCost=num(h.cost);
   var _cb='__proxy_'+Date.now()+'_'+Math.floor(Math.random()*1e6);
   window[_cb]=function(v){
@@ -1158,17 +1182,18 @@ function fetchProxyForFund(h){
         var cur=parseFloat(a[3]);
         var prev=parseFloat(a[4]);
         if(cur>0){
-          if(prevPrice>0&&prev>0){
-            // 估算基金价 = 昨收基金价 × (代理今价/代理昨价)  → 偏差小但能反映当日波动
-            h.price=prevPrice*(cur/prev);
+          if(anchor>0&&prev>0){
+            // 用稳定的基准净值计算今日估算价，**不**用 h.price 防止复利
+            h.price=anchor*(cur/prev);
           }else{
-            // 第一次：用代理价本身作为参考（用户后续可校准）
+            // 兜底：用代理价本身作为参考
             h.price=cur*(prevCost>0?prevCost/prev:1);
           }
           if(prev>0)h.day=(cur/prev-1)*100;
           h.upd=cur.toFixed(2)+' (代理 '+esc(proxy)+')';
           h._q=true;
           h._src='proxy';
+          // 注意：故意不更新 _navAnchor，让基准保持稳定
         }
       }
     }catch(e){}
