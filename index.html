@@ -638,7 +638,7 @@ const KEY='holding_dashboard_v2';
 const ACCT_KEY='holding_dashboard_accts';
 const SNAP_KEY='holding_dashboard_snapshots';
 const DATA_VER='holding_dashboard_ver';
-const CUR_VER=5; // v5: 修复 60s 缓存命中路径的 finishQuote 过早触发，导致 "1/8 已更新"
+const CUR_VER=6; // v6: 整体审查+小幅修复（1.加 _fundgzDone 防止 fundgz 4s 超时+慢响应双重 dec；2.isQDII 扩 +恒生/中概/H股/国企/日韩越印；3.load() 清理 _fundgzDone/_isHKMF）
 let data=load();
 let editId=null;
 let acctFilter='全部';
@@ -766,12 +766,14 @@ function load(){
     const r=localStorage.getItem(KEY);
     if(r){
       var arr=JSON.parse(r);
-      // 清理临时运行时标志（_q/_src），但**保留** _navAnchor
+      // 清理临时运行时标志（_q/_src/_fundgzDone/_isHKMF），但**保留** _navAnchor
       // _navAnchor 是稳定的"基准净值"（最后一次 fundgz 返回的真实值，或 xlsx 初始值），
       // 必须跨 session 保留，否则当代理 ETF 与基金真实净值出现跟踪误差时会反复重置基准
       for(var _li=0;_li<arr.length;_li++){
         delete arr[_li]._q;
         delete arr[_li]._src;
+        delete arr[_li]._fundgzDone;
+        delete arr[_li]._isHKMF;
       }
       return arr;
     }
@@ -798,7 +800,7 @@ function canQuote(h){
   }
   return false;
 }
-function isQDII(h){return /QDII|全球|环球|海外|互认|港股通|全球科技|纳斯达克|标普|美股|港股|亚太/i.test(h.name||'');}
+function isQDII(h){return /QDII|全球|环球|海外|互认|港股通|全球科技|纳斯达克|标普|美股|港股|亚太|恒生|中概|H股|国企|日经|韩国|越南|印度/i.test(h.name||'');}
 function moneyCNY(cny){return '¥'+fmt(cny,2);}
 
 /* 确保 holding 有 trades 数组（向后兼容） */
@@ -1079,7 +1081,7 @@ function cacheQuote(code,price,day,upd,src){
 window.jsonpgz=function(d){
   if(!d||!d.fundcode){
     // fundgz 失败：仅 QDII/HK 互认基金走代理（其他基金直接 dec 释放 pending）
-    var failMatches=data.filter(x=>!x._q&&x.code&&(isQDII(x)||/^HK\d{6,}$/i.test(x.code||'')));
+    var failMatches=data.filter(x=>!x._q&&!x._fundgzDone&&x.code&&(isQDII(x)||/^HK\d{6,}$/i.test(x.code||'')));
     if(failMatches.length>0){
       failMatches.forEach(h=>{
         if(!h.proxy){
@@ -1093,7 +1095,9 @@ window.jsonpgz=function(d){
     }
     return;
   }
-  var matches=data.filter(x=>x.code===d.fundcode&&!x._q);
+  // 防御：fallback 已经放弃 fundgz（_fundgzDone=true）但 script 4s 后才完成加载，
+  // 此时 fundgz 真实数据到达也不能再 dec()，否则会双重计数
+  var matches=data.filter(x=>x.code===d.fundcode&&!x._q&&!x._fundgzDone);
   var hasMatch=matches.length>0;
   matches.forEach(h=>{
     if(h){
@@ -1110,7 +1114,7 @@ window.jsonpgz=function(d){
   });
   // 注意：QDII 已经在 fetchFund 里跳过 fundgz 走代理了，
   // 走到这里的都是非 QDII 基金，**不再**叠加代理。
-  dec();
+  if(hasMatch)dec();
 };
 // 根据 QDII 基金名称自动推荐最相关的代理 ETF/股票
 function autoPickProxy(h){
@@ -1170,6 +1174,8 @@ function fetchFund(h){
     if(fired)return;fired=true;
     if(s.parentNode)s.remove();
     if(!h._q){
+      // 标记 fundgz 已放弃（防止罕见的"4s 后 fundgz 才返回"导致 jsonpgz 重复 dec）
+      h._fundgzDone=true;
       // 基金不取价（QDII 才走代理，非 QDII 就放弃）
       if(isQDII(h)&&h.proxy)fetchProxyForFund(h);
       else dec();
