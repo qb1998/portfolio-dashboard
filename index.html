@@ -1067,10 +1067,18 @@ function setBusy(on){
 }
 
 let pending=0, manualFlag=false, quoteGuard=null, quoteDone=false;
+// 行情缓存：60s 内不重复发请求。_quoteCache 存时间戳，_quoteCacheV 存实际数据
+var _quoteCache={};
+var _quoteCacheV={};
+function cacheQuote(code,price,day,upd,src){
+  if(!code)return;
+  _quoteCache[code]=Date.now();
+  _quoteCacheV[code]={price:price,day:day,upd:upd,_src:src||'direct'};
+}
 
 window.jsonpgz=function(d){
   if(!d||!d.fundcode){
-    // fundgz 失败：找出所有应该走代理的未取价基金
+    // fundgz 失败：仅 QDII/HK 互认基金走代理（其他基金直接 dec 释放 pending）
     var failMatches=data.filter(x=>!x._q&&x.code&&(isQDII(x)||/^HK\d{6,}$/i.test(x.code||'')));
     if(failMatches.length>0){
       failMatches.forEach(h=>{
@@ -1096,20 +1104,13 @@ window.jsonpgz=function(d){
       if(d.gszzl) h.day=num(d.gszzl);
       h.upd=(d.gztime||'').replace(/^\d{4}-/,'')+(isQDII(h)?'(QDII收盘)':'');
       h._q=true;
+      // 缓存
+      cacheQuote(h.code,h.price,h.day,h.upd,h._src);
     }
   });
-  // 关键修复：QDII 基金 fundgz 只在 22:00/04:00 出真实净值，白天拿到的是昨天的。
-  // 有代理时再叠一层代理 ETF 当日波动，得到"白天实时估值"。
-  // fetchProxyForFund 会用刚拿到的 _navAnchor 作为基准，**不会**复利。
-  if(hasMatch){
-    matches.forEach(h=>{
-      if(h&&isQDII(h)&&h.proxy){
-        fetchProxyForFund(h);
-      }
-    });
-    return;
-  }
-  if(!hasMatch){dec();return;}
+  // 注意：QDII 已经在 fetchFund 里跳过 fundgz 走代理了，
+  // 走到这里的都是非 QDII 基金，**不再**叠加代理。
+  dec();
 };
 // 根据 QDII 基金名称自动推荐最相关的代理 ETF/股票
 function autoPickProxy(h){
@@ -1130,6 +1131,11 @@ function autoPickProxy(h){
   return 'usQQQ';
 }
 function fetchFund(h){
+  // 性能优化：60秒内不重复请求同一支基金
+  if(_quoteCache[h.code]&&(Date.now()-_quoteCache[h.code])<60000){
+    var cached=_quoteCacheV[h.code];
+    if(cached){h.price=cached.price;h.day=cached.day;h.upd=cached.upd+'(缓存)';h._q=true;h._src=cached._src;finishQuote();return;}
+  }
   // 港股互认基金（HK+6位以上数字）：fundgz 100% 不支持，直接走代理
   if(/^HK\d{6,}$/i.test(h.code||'')){
     h._isHKMF=true;
@@ -1140,17 +1146,34 @@ function fetchFund(h){
     fetchProxyForFund(h);
     return;
   }
-  // 其他 6 位基金（含 QDII 如 100055）：先 fundgz 拿真实净值（重置 _navAnchor），
-  // QDII 有代理时 jsonpgz 会再调代理叠加当日波动
-  if(!h.proxy&&isQDII(h)&&!/^HK/.test(h.code||'')){
-    var ap2=autoPickProxy(h);
-    if(ap2){h.proxy=ap2;persist();}
+  // 性能优化：QDII 基金白天 fundgz 永远拿不到当日净值（返回 T-1），
+  // 直接走代理 ETF，不需要等 fundgz 5 秒才发现是昨日净值
+  if(isQDII(h)&&!/^HK/.test(h.code||'')){
+    if(!h.proxy){
+      var ap2=autoPickProxy(h);
+      if(ap2){h.proxy=ap2;persist();}
+    }
+    fetchProxyForFund(h);
+    return;
   }
+  // 其他 6 位基金（含非 QDII 基金）：走 fundgz
   pending++;
   var s=document.createElement('script');
   s.src='https://fundgz.1234567.com.cn/js/'+encodeURIComponent(h.code)+'.js?rt='+Date.now();
-  s.onerror=()=>{pending--;fetchProxyForFund(h);s.remove();}; // fundgz 失败时走代理（QDII 才会到这里）
-  s.onload=()=>{s.remove();};
+  // 关键：4 秒还没回调就认为 fundgz 挂掉了，强行触发 onload 走 fallback
+  var fired=false;
+  var fallback=function(){
+    if(fired)return;fired=true;
+    if(s.parentNode)s.remove();
+    if(!h._q){
+      // 基金不取价（QDII 才走代理，非 QDII 就放弃）
+      if(isQDII(h)&&h.proxy)fetchProxyForFund(h);
+      else dec();
+    }
+  };
+  s.onerror=fallback;
+  s.onload=function(){fired=true;if(s.parentNode)s.remove();};
+  setTimeout(fallback,4000); // 4s 硬超时
   document.body.appendChild(s);
 }
 function fetchProxyForFund(h){
@@ -1165,6 +1188,24 @@ function fetchProxyForFund(h){
     }
     return;
   }
+  // 性能优化：60秒缓存
+  if(_quoteCache[proxy]&&(Date.now()-_quoteCache[proxy])<60000){
+    var c2=_quoteCacheV[proxy];
+    if(c2){
+      if(typeof h._navAnchor!=='number'||h._navAnchor<=0)h._navAnchor=num(h.price);
+      var anchor2=h._navAnchor;
+      // 缓存的代理价复用：用上一次缓存时计算的 ratio = cur/prev
+      if(c2.ratio&&anchor2>0){
+        h.price=anchor2*c2.ratio;
+        h.day=c2.day;
+        h.upd=c2.updRaw+' (代理缓存)';
+        h._q=true;
+        h._src='proxy';
+      }
+      dec();
+      return;
+    }
+  }
   // 有代理：调股票 API 拿代理 ETF 实时价
   pending++;
   var pCode=normCode(proxy);
@@ -1175,25 +1216,30 @@ function fetchProxyForFund(h){
   var anchor=h._navAnchor;
   var prevCost=num(h.cost);
   var _cb='__proxy_'+Date.now()+'_'+Math.floor(Math.random()*1e6);
+  var done=false;
+  var updRaw='';var dayV=0;var cur=0,prev=0;
   window[_cb]=function(v){
+    if(done)return;done=true;
     try{
       if(v&&v.indexOf('none_match')<0){
         var a=v.split('~');
-        var cur=parseFloat(a[3]);
-        var prev=parseFloat(a[4]);
+        cur=parseFloat(a[3]);
+        prev=parseFloat(a[4]);
         if(cur>0){
           if(anchor>0&&prev>0){
-            // 用稳定的基准净值计算今日估算价，**不**用 h.price 防止复利
             h.price=anchor*(cur/prev);
           }else{
-            // 兜底：用代理价本身作为参考
             h.price=cur*(prevCost>0?prevCost/prev:1);
           }
           if(prev>0)h.day=(cur/prev-1)*100;
-          h.upd=cur.toFixed(2)+' (代理 '+esc(proxy)+')';
+          dayV=h.day;
+          updRaw=cur.toFixed(2);
+          h.upd=updRaw+' (代理 '+esc(proxy)+')';
           h._q=true;
           h._src='proxy';
-          // 注意：故意不更新 _navAnchor，让基准保持稳定
+          // 缓存：记录 cur/prev 比例，下次复用避免复利
+          if(prev>0)cacheQuote(proxy,h.price,h.day,updRaw,'proxy');
+          _quoteCacheV[proxy].ratio=cur/prev;
         }
       }
     }catch(e){}
@@ -1205,6 +1251,8 @@ function fetchProxyForFund(h){
   s.src='https://qt.gtimg.cn/q='+encodeURIComponent(pCode)+'&r='+Date.now();
   s.onload=function(){try{var v=window['v_'+pCode];if(v)window[_cb](v);else dec();}catch(e){dec();}s.remove();};
   s.onerror=function(){try{delete window[_cb];}catch(e){}dec();s.remove();};
+  // 4秒硬超时：qt.gtimg 慢或挂时不等 8s
+  setTimeout(function(){if(!done){done=true;try{delete window[_cb];}catch(e){}dec();s.remove();}},4000);
   document.body.appendChild(s);
 }
 function normCode(raw){
@@ -1227,29 +1275,43 @@ function normCode(raw){
   return c;
 }
 function fetchStock(h){
+  var code=normCode(h.code);
+  // 性能优化：60秒缓存
+  if(_quoteCache[h.code]&&(Date.now()-_quoteCache[h.code])<60000){
+    var c3=_quoteCacheV[h.code];
+    if(c3){h.price=c3.price;h.day=c3.day;h.upd=c3.upd+'(缓存)';h._q=true;h._src=c3._src;finishQuote();return;}
+  }
   pending++;
-  const code=normCode(h.code);
-  const s=document.createElement('script');
+  var s=document.createElement('script');
   s.src='https://qt.gtimg.cn/q='+encodeURIComponent(code)+'&r='+Date.now();
   s.charset='GBK';
-  s.onload=()=>{
+  var done2=false;
+  var finish=function(){
+    if(done2)return;done2=true;
+    try{dec();s.remove();}catch(e){}
+  };
+  s.onload=function(){
     try{
-      const v=window['v_'+code];
+      var v=window['v_'+code];
       if(v&&v.indexOf('none_match')<0){
-        const a=v.split('~');
-        const price=parseFloat(a[3]);
-        const prev=parseFloat(a[4]);
+        var a=v.split('~');
+        var price=parseFloat(a[3]);
+        var prev=parseFloat(a[4]);
         if(price){h.price=price;}
         if(price&&prev){h.day=(price/prev-1)*100;}
-        let t=a[30]||'';
+        var t=a[30]||'';
         t=t.replace(/^\d{4}[-\/]/,'').replace(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/,'$2-$3 $4:$5');
         h.upd=t;
         h._q=true;
+        // 缓存
+        cacheQuote(h.code,h.price,h.day,t,'stock');
       }
     }catch(e){}
-    dec();s.remove();
+    finish();
   };
-  s.onerror=()=>{dec();s.remove();};
+  s.onerror=finish;
+  // 4秒硬超时：qt.gtimg 慢或挂时快速失败
+  setTimeout(finish,4000);
   document.body.appendChild(s);
 }
 function dec(){pending--;if(pending<=0)finishQuote();}
@@ -1274,13 +1336,31 @@ function finishQuote(){
   document.getElementById('updateMeta').textContent='行情更新于 '+new Date().toLocaleTimeString('zh-CN')+' · QDII为收盘估值 · 数据存本机';
 }
 function refreshQuotes(manual){
-  const targets=data.filter(canQuote);
+  var targets=data.filter(canQuote);
   if(!targets.length){if(manual)toast('没有可自动取价的持仓（需填代码）');return;}
-  quoteDone=false;manualFlag=!!manual;pending=0;data.forEach(h=>h._q=false);
+  // 性能优化：如果所有目标都命中缓存，瞬时返回不弹 loading
+  var allCached=true;
+  for(var _ci=0;_ci<targets.length;_ci++){
+    var ch=targets[_ci];
+    var key=(ch.type==='基金'&&ch.code&&!/^HK\d{6,}$/i.test(ch.code||'')&&isQDII(ch)&&ch.proxy)?ch.proxy:ch.code;
+    if(!_quoteCache[key]||(Date.now()-_quoteCache[key])>=60000){allCached=false;break;}
+  }
+  if(allCached){
+    // 全命中缓存：直接用缓存数据填充，不发请求
+    quoteDone=false;pending=0;data.forEach(function(h){h._q=false;});
+    targets.forEach(function(h){
+      var c=_quoteCacheV[(h.type==='基金'&&h.proxy)?h.proxy:h.code];
+      if(c){h.price=c.price;h.day=c.day;h.upd=c.upd+'(缓存)';h._q=true;h._src=c._src;}
+    });
+    finishQuote();
+    return;
+  }
+  quoteDone=false;manualFlag=!!manual;pending=0;data.forEach(function(h){h._q=false;});
   setBusy(true);
   clearTimeout(quoteGuard);
-  quoteGuard=setTimeout(()=>{finishQuote();},8000);
-  targets.forEach(h=>{ if(h.type==='基金') fetchFund(h); else fetchStock(h); });
+  // 性能优化：8秒缩到 5 秒（每个 fetchFund/fetchProxyForFund 都有 4s 硬超时兜底）
+  quoteGuard=setTimeout(function(){finishQuote();},5000);
+  targets.forEach(function(h){ if(h.type==='基金') fetchFund(h); else fetchStock(h); });
 }
 function toggleAuto(){
   const on=document.getElementById('autoToggle').checked;
