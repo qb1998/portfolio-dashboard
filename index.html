@@ -638,7 +638,7 @@ const KEY='holding_dashboard_v2';
 const ACCT_KEY='holding_dashboard_accts';
 const SNAP_KEY='holding_dashboard_snapshots';
 const DATA_VER='holding_dashboard_ver';
-const CUR_VER=4; // v4: 修复 QDII 代理估值复利 bug（持久化的 _navAnchor 必须清掉）
+const CUR_VER=5; // v5: 修复 60s 缓存命中路径的 finishQuote 过早触发，导致 "1/8 已更新"
 let data=load();
 let editId=null;
 let acctFilter='全部';
@@ -1134,7 +1134,11 @@ function fetchFund(h){
   // 性能优化：60秒内不重复请求同一支基金
   if(_quoteCache[h.code]&&(Date.now()-_quoteCache[h.code])<60000){
     var cached=_quoteCacheV[h.code];
-    if(cached){h.price=cached.price;h.day=cached.day;h.upd=cached.upd+'(缓存)';h._q=true;h._src=cached._src;finishQuote();return;}
+    if(cached){h.price=cached.price;h.day=cached.day;h.upd=cached.upd+'(缓存)';h._q=true;h._src=cached._src;}
+    // 关键修复：用 dec() 而不是 finishQuote()，否则第一个命中缓存的会
+    // 立即终结整个刷新流程，导致 toast 只显示 1/N
+    dec();
+    return;
   }
   // 港股互认基金（HK+6位以上数字）：fundgz 100% 不支持，直接走代理
   if(/^HK\d{6,}$/i.test(h.code||'')){
@@ -1157,7 +1161,7 @@ function fetchFund(h){
     return;
   }
   // 其他 6 位基金（含非 QDII 基金）：走 fundgz
-  pending++;
+  // （pending 已在 refreshQuotes 预置，无需再 ++）
   var s=document.createElement('script');
   s.src='https://fundgz.1234567.com.cn/js/'+encodeURIComponent(h.code)+'.js?rt='+Date.now();
   // 关键：4 秒还没回调就认为 fundgz 挂掉了，强行触发 onload 走 fallback
@@ -1180,7 +1184,7 @@ function fetchProxyForFund(h){
   var proxy=h.proxy||'';
   if(!proxy){
     // 无代理：尝试股票 API 直接拉（HK 基金代码有时能拿到港股实时）
-    pending++;
+    // （pending 已在 refreshQuotes 预置，无需再 ++）
     if(h.code&&/^[A-Za-z]{2}\d{5,}$/.test(h.code)){
       fetchStock(h);
     }else{
@@ -1207,7 +1211,7 @@ function fetchProxyForFund(h){
     }
   }
   // 有代理：调股票 API 拿代理 ETF 实时价
-  pending++;
+  // （pending 已在 refreshQuotes 预置，无需再 ++）
   var pCode=normCode(proxy);
   // 关键修复：使用稳定的"基准净值"（_navAnchor），而不是 h.price
   // 防止重复刷新时复利放大同一天的代理涨跌幅
@@ -1279,9 +1283,12 @@ function fetchStock(h){
   // 性能优化：60秒缓存
   if(_quoteCache[h.code]&&(Date.now()-_quoteCache[h.code])<60000){
     var c3=_quoteCacheV[h.code];
-    if(c3){h.price=c3.price;h.day=c3.day;h.upd=c3.upd+'(缓存)';h._q=true;h._src=c3._src;finishQuote();return;}
+    if(c3){h.price=c3.price;h.day=c3.day;h.upd=c3.upd+'(缓存)';h._q=true;h._src=c3._src;}
+    // 关键修复：同 fetchFund，缓存命中走 dec()，不要立即 finishQuote()
+    dec();
+    return;
   }
-  pending++;
+  // （pending 已在 refreshQuotes 预置，无需再 ++）
   var s=document.createElement('script');
   s.src='https://qt.gtimg.cn/q='+encodeURIComponent(code)+'&r='+Date.now();
   s.charset='GBK';
@@ -1355,11 +1362,15 @@ function refreshQuotes(manual){
     finishQuote();
     return;
   }
-  quoteDone=false;manualFlag=!!manual;pending=0;data.forEach(function(h){h._q=false;});
+  quoteDone=false;manualFlag=!!manual;data.forEach(function(h){h._q=false;});
   setBusy(true);
   clearTimeout(quoteGuard);
   // 性能优化：8秒缩到 5 秒（每个 fetchFund/fetchProxyForFund 都有 4s 硬超时兜底）
   quoteGuard=setTimeout(function(){finishQuote();},5000);
+  // 关键修复：预置 pending = 目标数（不再依赖每个 fetch 自己 pending++）
+  // 这样缓存命中路径的 dec() 能正确平衡计数，不会让第一个命中缓存的
+  // 立即触发 finishQuote 造成"1/8 项已更新"的假象
+  pending=targets.length;
   targets.forEach(function(h){ if(h.type==='基金') fetchFund(h); else fetchStock(h); });
 }
 function toggleAuto(){
